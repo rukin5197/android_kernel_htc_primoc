@@ -15,6 +15,8 @@ OBJS		+= mmcif-sh7372.o
 endif
 endif
 
+plus_sec := $(call as-instr,.arch_extension sec,+sec)
+
 AFLAGS_head.o += -DTEXT_OFFSET=$(TEXT_OFFSET)
 HEAD	= head.o
 OBJS	+= misc.o decompress.o
