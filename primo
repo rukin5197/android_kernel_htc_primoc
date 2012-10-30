@@ -1,0 +1,6565 @@
+diff -u -r -N android_kernel_htc_primoc/arch/arm/configs/primoc_defconfig android_kernel_htc_primoc.new/arch/arm/configs/primoc_defconfig
+--- android_kernel_htc_primoc/arch/arm/configs/primoc_defconfig	2012-10-30 01:04:21.268133098 +0100
++++ android_kernel_htc_primoc.new/arch/arm/configs/primoc_defconfig	2012-10-30 01:12:18.351345373 +0100
+@@ -861,22 +861,13 @@
+ # CONFIG_HAMRADIO is not set
+ # CONFIG_CAN is not set
+ # CONFIG_IRDA is not set
+-CONFIG_BT=y
+-# CONFIG_BT_SCO is not set
+-CONFIG_BT_RFCOMM=y
+-# CONFIG_BT_RFCOMM_TTY is not set
+-CONFIG_BT_BNEP=m
+-# CONFIG_BT_BNEP_MC_FILTER is not set
+-# CONFIG_BT_BNEP_PROTO_FILTER is not set
+-CONFIG_BT_HIDP=m
+-CONFIG_BT_HID_BRCM=y
+ 
+ #
+ # Bluetooth device drivers
+ #
+ # CONFIG_BT_HCIBTSDIO is not set
+-# CONFIG_BT_HCIUART is not set
+-# CONFIG_BT_HCIUART_H4 is not set
++CONFIG_BT_HCIUART=y
++CONFIG_BT_HCIUART_H4=y
+ # CONFIG_BT_HCIUART_IBS is not set
+ # CONFIG_MSM_BT_POWER is not set
+ # CONFIG_BT_HCIVHCI is not set
+@@ -893,6 +884,16 @@
+ CONFIG_LIB80211=y
+ CONFIG_BTPORT=y
+ CONFIG_BTPORT_DRV=y
++CONFIG_BT=y
++CONFIG_BT_L2CAP=y
++CONFIG_BT_SCO=y
++CONFIG_BT_RFCOMM=y
++# CONFIG_BT_RFCOMM_TTY is not set
++CONFIG_BT_BNEP=y
++# CONFIG_BT_BNEP_MC_FILTER is not set
++# CONFIG_BT_BNEP_PROTO_FILTER is not set
++CONFIG_BT_HIDP=y
++CONFIG_BT_HID_BRCM=y
+ 
+ #
+ # CFG80211 needs to be enabled for MAC80211
+@@ -1165,9 +1166,10 @@
+ CONFIG_SERIAL_MSM_CONSOLE=y
+ CONFIG_SERIAL_MSM_CLOCK_CONTROL=y
+ # CONFIG_SERIAL_MSM_RX_WAKEUP is not set
+-CONFIG_SERIAL_MSM_HS=y
++# CONFIG_SERIAL_MSM_HS is not set
+ # CONFIG_SERIAL_MSM_HS_PURE_ANDROID is not set
+-# CONFIG_SERIAL_BCM_BT_LPM is not set
++CONFIG_SERIAL_BCM_BT_LPM=y
++CONFIG_SERIAL_MSM_HS_LPM=y
+ # CONFIG_SERIAL_TIMBERDALE is not set
+ # CONFIG_SERIAL_ALTERA_JTAGUART is not set
+ # CONFIG_SERIAL_ALTERA_UART is not set
+diff -u -r -N android_kernel_htc_primoc/arch/arm/mach-msm/board-primoc.c android_kernel_htc_primoc.new/arch/arm/mach-msm/board-primoc.c
+--- android_kernel_htc_primoc/arch/arm/mach-msm/board-primoc.c	2012-10-30 01:04:21.335133128 +0100
++++ android_kernel_htc_primoc.new/arch/arm/mach-msm/board-primoc.c	2012-10-30 00:58:16.798963069 +0100
+@@ -114,6 +114,10 @@
+ #include <mach/htc_bdaddress.h>
+ #endif
+ 
++#ifdef CONFIG_SERIAL_BCM_BT_LPM
++#include <mach/bcm_bt_lpm.h>
++#endif
++
+ #ifdef CONFIG_MFD_MAX8957
+ #include <linux/mfd/pmicmax8957.h>
+ #include <linux/max8957_gpio.h>
+@@ -3423,18 +3427,40 @@
+ };
+ #endif
+ 
+-#ifdef CONFIG_SERIAL_MSM_HS
++#if defined(CONFIG_SERIAL_MSM_HS) || defined(CONFIG_SERIAL_MSM_HS_LPM)
+ static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
++        .rx_wakeup_irq = -1,
+ 	.inject_rx_on_wakeup = 0,
+-	.cpu_lock_supported = 1,
+ 
++#ifdef CONFIG_SERIAL_BCM_BT_LPM
++	.exit_lpm_cb = bcm_bt_lpm_exit_lpm_locked,
++#else
+ 	/* for bcm BT */
+ 	.bt_wakeup_pin_supported = 1,
+ 	.bt_wakeup_pin = PRIMOC_GPIO_BT_WAKE,
+ 	.host_wakeup_pin = PRIMOC_GPIO_BT_HOST_WAKE,
++#endif
++};
++
++#ifdef CONFIG_SERIAL_BCM_BT_LPM
++static struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
++	.gpio_wake = PRIMOC_GPIO_BT_WAKE,
++	.gpio_host_wake = PRIMOC_GPIO_BT_HOST_WAKE,
++	.request_clock_off_locked = msm_hs_request_clock_off_locked,
++	.request_clock_on_locked = msm_hs_request_clock_on_locked,
++};
++
++struct platform_device bcm_bt_lpm_device = {
++	.name = "bcm_bt_lpm",
++	.id = 0,
++	.dev = {
++		.platform_data = &bcm_bt_lpm_pdata,
++	},
+ };
+ #endif
+ 
++#endif
++
+ #ifdef CONFIG_BT
+ static struct platform_device primoc_rfkill = {
+ 	.name = "primoc_rfkill",
+@@ -3835,8 +3861,11 @@
+ #endif
+ 	&msm_ebi0_thermal,
+ 	&msm_ebi1_thermal,
+-#ifdef CONFIG_SERIAL_MSM_HS
+-	&msm_device_uart_dm1,
++#ifdef CONFIG_SERIAL_BCM_BT_LPM
++       &bcm_bt_lpm_device,
++#endif
++#if defined(CONFIG_SERIAL_MSM_HS) || defined(CONFIG_SERIAL_MSM_HS_LPM)
++       &msm_device_uart_dm1,
+ #endif
+ #ifdef CONFIG_BT
+ 	&primoc_rfkill,
+@@ -5210,9 +5239,16 @@
+ 	bt_export_bd_address();
+ #endif
+ 
++#if defined(CONFIG_SERIAL_MSM_HS) || defined(CONFIG_SERIAL_MSM_HS_LPM)
++#ifndef CONFIG_SERIAL_BCM_BT_LPM
++	msm_uart_dm1_pdata.rx_wakeup_irq = gpio_to_irq(PRIMOU_GPIO_BT_HOST_WAKE);
++#endif
+ #ifdef CONFIG_SERIAL_MSM_HS
+-	msm_uart_dm1_pdata.rx_wakeup_irq = gpio_to_irq(PRIMOC_GPIO_BT_HOST_WAKE);
+ 	msm_device_uart_dm1.name = "msm_serial_hs_brcm";
++#endif
++#ifdef CONFIG_SERIAL_MSM_HS_LPM
++	msm_device_uart_dm1.name = "msm_serial_hs_brcm_lpm";
++#endif
+ 	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
+ #endif
+ 
+diff -u -r -N android_kernel_htc_primoc/arch/arm/mach-msm/clock-7x30.c android_kernel_htc_primoc.new/arch/arm/mach-msm/clock-7x30.c
+--- android_kernel_htc_primoc/arch/arm/mach-msm/clock-7x30.c	2012-10-30 01:04:21.336133128 +0100
++++ android_kernel_htc_primoc.new/arch/arm/mach-msm/clock-7x30.c	2012-10-30 00:59:44.054004474 +0100
+@@ -2853,8 +2853,12 @@
+ 	OWN(ROW2,  1, "iface_clk",	spi_p_clk,	"spi_qsd.0"),
+ 	OWN(ROW2,  9, "core_clk",	uart1_clk,	"msm_serial.0"),
+ 	OWN(ROW2,  6, "core_clk",	uart1dm_clk,	"msm_serial_hs.0"),
++#ifdef CONFIG_SERIAL_MSM_HS
+ 	OWN(ROW2,  6, "core_clk",	uart1dm_clk,	"msm_serial_hs_brcm.0"),/* for brcm BT */
+-	OWN(ROW2,  6, "core_clk",	uart1dm_clk,	"msm_serial_hs_ti_dc.0"),/* for ti BT */
++#endif
++#ifdef CONFIG_SERIAL_MSM_HS_LPM
++	OWN(ROW2,  6, "core_clk",	uart1dm_clk,	"msm_serial_hs_brcm_lpm.0"),/* for brcm BT */
++#endif
+ 	OWN(ROW2,  8, "core_clk",	uart2dm_clk,	"msm_serial_hs.1"),
+ 	OWN(ROW2, 11, "alt_core_clk",	usb_hs_clk,	"msm_otg"),
+ 	OWN(ROW2, 11, "core_clk",	usb_hs_core_clk, "msm_otg"),
+@@ -2888,9 +2892,14 @@
+ 	OWN(GLBL, 13, "iface_clk",	rotator_p_clk,	"footswitch-pcom.6"),
+ 	{ CLK_LOOKUP("iface_clk",     uart1dm_p_clk.c, "msm_serial_hs.0"),
+ 		O(GLBL), BIT(8), &dummy_clk },
++#ifdef CONFIG_SERIAL_MSM_HS
+ 	{ CLK_LOOKUP("iface_clk",     uart1dm_p_clk.c, "msm_serial_hs_brcm.0"),/* for brcm BT */
+ 		O(GLBL), BIT(8), &dummy_clk },
+-
++#endif
++#ifdef CONFIG_SERIAL_MSM_HS_LPM
++	{ CLK_LOOKUP("iface_clk",     uart1dm_p_clk.c, "msm_serial_hs_brcm_lpm.0"),/* for brcm BT */
++		O(GLBL), BIT(8), &dummy_clk },
++#endif
+ 	{ CLK_LOOKUP("iface_clk",     uart2dm_p_clk.c, "msm_serial_hs.1"),
+ 		O(GLBL), BIT(8), &dummy_clk },
+ };
+diff -u -r -N android_kernel_htc_primoc/arch/arm/mach-msm/include/mach/bcm_bt_lpm.h android_kernel_htc_primoc.new/arch/arm/mach-msm/include/mach/bcm_bt_lpm.h
+--- android_kernel_htc_primoc/arch/arm/mach-msm/include/mach/bcm_bt_lpm.h	1970-01-01 01:00:00.000000000 +0100
++++ android_kernel_htc_primoc.new/arch/arm/mach-msm/include/mach/bcm_bt_lpm.h	2012-10-30 01:02:33.973083818 +0100
+@@ -0,0 +1,36 @@
++/*
++ * Copyright (C) 2009 Google, Inc.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++#ifndef __ASM_ARCH_BCM_BT_LPM_H
++#define __ASM_ARCH_BCM_BT_LPM_H
++
++#include <linux/serial_core.h>
++
++/* Uart driver must call this every time it beings TX, to ensure
++ * this driver keeps WAKE asserted during TX. Called with uart
++ * spinlock held. */
++extern void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport);
++
++struct bcm_bt_lpm_platform_data {
++	unsigned int gpio_wake;   /* CPU -> BCM wakeup gpio */
++	unsigned int gpio_host_wake;  /* BCM -> CPU wakeup gpio */
++
++	/* Callback to request the uart driver to clock off.
++         * Called with uart spinlock held. */
++	void (*request_clock_off_locked)(struct uart_port *uport);
++	/* Callback to request the uart driver to clock on.
++         * Called with uart spinlock held. */
++	void (*request_clock_on_locked)(struct uart_port *uport);
++};
++
++#endif
+diff -u -r -N android_kernel_htc_primoc/arch/arm/mach-msm/include/mach/msm_serial_hs.h android_kernel_htc_primoc.new/arch/arm/mach-msm/include/mach/msm_serial_hs.h
+--- android_kernel_htc_primoc/arch/arm/mach-msm/include/mach/msm_serial_hs.h	2012-10-30 01:04:21.344133132 +0100
++++ android_kernel_htc_primoc.new/arch/arm/mach-msm/include/mach/msm_serial_hs.h	2012-10-30 01:00:42.260031841 +0100
+@@ -33,6 +33,11 @@
+ 	unsigned char bt_wakeup_pin_supported;
+ 	unsigned char bt_wakeup_pin;	/* Device to Chip */
+ 	unsigned char host_wakeup_pin;	/* Chip to Device */
++
++#ifdef CONFIG_SERIAL_BCM_BT_LPM
++        void (*exit_lpm_cb)(struct uart_port *);
++#endif
++
+ };
+ #if 1		//Add by evan.xu@2012-02-02
+ /* API for TI_ST */
+@@ -46,6 +51,12 @@
+ unsigned int msm_hs_tx_empty(struct uart_port *uport);
+ void msm_hs_request_clock_off(struct uart_port *uport);
+ void msm_hs_request_clock_on(struct uart_port *uport);
++
++#ifdef CONFIG_SERIAL_BCM_BT_LPM
++void msm_hs_request_clock_off_locked(struct uart_port *uport);
++void msm_hs_request_clock_on_locked(struct uart_port *uport);
++#endif
++
+ void msm_hs_set_mctrl(struct uart_port *uport,
+ 				    unsigned int mctrl);
+ #endif
+diff -u -r -N android_kernel_htc_primoc/drivers/tty/serial/bcm_bt_lpm.c android_kernel_htc_primoc.new/drivers/tty/serial/bcm_bt_lpm.c
+--- android_kernel_htc_primoc/drivers/tty/serial/bcm_bt_lpm.c	1970-01-01 01:00:00.000000000 +0100
++++ android_kernel_htc_primoc.new/drivers/tty/serial/bcm_bt_lpm.c	2012-10-30 01:01:21.067049976 +0100
+@@ -0,0 +1,186 @@
++/*
++ * Copyright (C) 2009 Google, Inc.
++ *
++ * This software is licensed under the terms of the GNU General Public
++ * License version 2, as published by the Free Software Foundation, and
++ * may be copied, distributed, and modified under those terms.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++ * GNU General Public License for more details.
++ */
++
++#include <linux/module.h>
++#include <linux/platform_device.h>
++#include <linux/hrtimer.h>
++#include <linux/irq.h>
++#include <linux/serial_core.h>
++#include <mach/bcm_bt_lpm.h>
++#include <asm/gpio.h>
++
++/*
++ * Manage WAKE and HOST_WAKE low power mode signals for Broadcom
++ * Bluetooth chipsets.
++ *
++ * This driver needs to be tightly coupled with a uart driver that supports
++ * request_clock_off_locked() and request_clock_on_locked(), to clock off and
++ * on the uart indepdently of Linux suspend/resume.
++ *
++ * The uart driver needs to call bcm_bt_lpm_exit_lpm_locked() every time it
++ * begins TX, to ensure this driver keeps WAKE asserted during TX.
++ *
++ * The callbacks and hijacking of the uart_port struct are not a clean API,
++ * but the Linux tty and serial core layers do not have a better alternative
++ * right now: there is no good way to plumb uart clock control through these
++ * layers. See http://lkml.org/lkml/2008/12/19/213 for more background.
++ */
++
++struct bcm_bt_lpm {
++	unsigned int gpio_wake;
++	unsigned int gpio_host_wake;
++
++	int wake;
++	int host_wake;
++
++	struct hrtimer enter_lpm_timer;
++	ktime_t enter_lpm_delay;
++
++	struct uart_port *uport;
++
++	void (*request_clock_off_locked)(struct uart_port *uport);
++	void (*request_clock_on_locked)(struct uart_port *uport);
++} bt_lpm;
++
++static void set_wake_locked(int wake)
++{
++	if (wake == bt_lpm.wake)
++		return;
++	bt_lpm.wake = wake;
++
++	printk(KERN_ERR "[BT] %s wake=%d\n", __func__, wake);
++
++	gpio_set_value(bt_lpm.gpio_wake, wake);
++	if (wake || bt_lpm.host_wake)
++		bt_lpm.request_clock_on_locked(bt_lpm.uport);
++	else
++		bt_lpm.request_clock_off_locked(bt_lpm.uport);
++
++}
++
++static enum hrtimer_restart enter_lpm(struct hrtimer *timer) {
++	unsigned long flags;
++
++	printk(KERN_ERR "[BT] %s\n", __func__);
++
++	spin_lock_irqsave(&bt_lpm.uport->lock, flags);
++	set_wake_locked(0);
++	spin_unlock_irqrestore(&bt_lpm.uport->lock, flags);
++
++	return HRTIMER_NORESTART;
++}
++
++void bcm_bt_lpm_exit_lpm_locked(struct uart_port *uport) {
++	printk(KERN_ERR "[BT] %s\n", __func__);
++
++	bt_lpm.uport = uport;
++
++	hrtimer_try_to_cancel(&bt_lpm.enter_lpm_timer);
++
++	set_wake_locked(1);
++
++	hrtimer_start(&bt_lpm.enter_lpm_timer, bt_lpm.enter_lpm_delay,
++			HRTIMER_MODE_REL);
++}
++
++EXPORT_SYMBOL(bcm_bt_lpm_exit_lpm_locked);
++
++static void update_host_wake_locked(int host_wake)
++{
++	printk(KERN_ERR "[BT] %s\n", __func__);
++	if (host_wake == bt_lpm.host_wake)
++		return;
++	bt_lpm.host_wake = host_wake;
++
++	if (bt_lpm.wake || host_wake)
++		bt_lpm.request_clock_on_locked(bt_lpm.uport);
++	else
++		bt_lpm.request_clock_off_locked(bt_lpm.uport);
++}
++
++static irqreturn_t host_wake_isr(int irq, void *dev)
++{
++	int host_wake;
++	unsigned long flags;
++
++	host_wake = gpio_get_value(bt_lpm.gpio_host_wake);
++
++	printk(KERN_INFO "[BT] %s host_wake=%d\n", __func__, host_wake);
++	irq_set_irq_type(irq, host_wake ? IRQF_TRIGGER_LOW : IRQF_TRIGGER_HIGH);
++
++	if (!bt_lpm.uport) {
++		bt_lpm.host_wake = host_wake;
++		return IRQ_HANDLED;
++	}
++
++	spin_lock_irqsave(&bt_lpm.uport->lock, flags);
++
++	update_host_wake_locked(host_wake);
++
++	spin_unlock_irqrestore(&bt_lpm.uport->lock, flags);
++
++	return IRQ_HANDLED;
++}
++
++static int bcm_bt_lpm_probe(struct platform_device *pdev)
++{
++	int irq;
++	int ret;
++	struct bcm_bt_lpm_platform_data *pdata = pdev->dev.platform_data;
++
++	if (bt_lpm.request_clock_off_locked != NULL) {
++		printk(KERN_ERR "Cannot register two bcm_bt_lpm drivers\n");
++		return -EINVAL;
++	}
++
++	bt_lpm.gpio_wake = pdata->gpio_wake;
++	bt_lpm.gpio_host_wake = pdata->gpio_host_wake;
++	bt_lpm.request_clock_off_locked = pdata->request_clock_off_locked;
++	bt_lpm.request_clock_on_locked = pdata->request_clock_on_locked;
++
++	hrtimer_init(&bt_lpm.enter_lpm_timer, CLOCK_MONOTONIC, HRTIMER_MODE_REL);
++	bt_lpm.enter_lpm_delay = ktime_set(1, 0);  /* 1 sec */
++	bt_lpm.enter_lpm_timer.function = enter_lpm;
++
++	gpio_set_value(bt_lpm.gpio_wake, 0);
++	bt_lpm.host_wake = 0;
++
++	irq = gpio_to_irq(bt_lpm.gpio_host_wake);
++	ret = request_irq(irq, host_wake_isr, IRQF_TRIGGER_HIGH,
++			"bt host_wake", NULL);
++	if (ret)
++		return ret;
++	ret = irq_set_irq_wake(irq, 1);
++	if (ret)
++		return ret;
++
++	return 0;
++}
++
++static struct platform_driver bcm_bt_lpm_driver = {
++	.probe = bcm_bt_lpm_probe,
++	.driver = {
++		.name = "bcm_bt_lpm",
++		.owner = THIS_MODULE,
++	},
++};
++
++static int __init bcm_bt_lpm_init(void)
++{
++	return platform_driver_register(&bcm_bt_lpm_driver);
++}
++
++module_init(bcm_bt_lpm_init);
++MODULE_DESCRIPTION("Broadcom Bluetooth low power mode driver");
++MODULE_AUTHOR("Nick Pelly <npelly@google.com>");
++MODULE_LICENSE("GPL");
+diff -u -r -N android_kernel_htc_primoc/drivers/tty/serial/Kconfig android_kernel_htc_primoc.new/drivers/tty/serial/Kconfig
+--- android_kernel_htc_primoc/drivers/tty/serial/Kconfig	2012-10-30 01:04:36.261139935 +0100
++++ android_kernel_htc_primoc.new/drivers/tty/serial/Kconfig	2012-10-30 01:02:11.380073361 +0100
+@@ -1356,6 +1356,19 @@
+ 	select SERIAL_CORE_CONSOLE
+ 	default n
+ 
++config SERIAL_MSM_HS_LPM
++	tristate "MSM UART High Speed: Serial Driver for LPM"
++	depends on ARCH_MSM
++	select SERIAL_CORE
++	select SERIAL_BCM_BT_LPM
++	help
++	  If you have a machine based on MSM family of SoCs, you
++	  can enable its onboard high speed serial port by enabling
++	  this option. This works only when using also SERIAL_BCM_BT_LPM
++
++	  Choose M here to compile it as a module. The module will be
++	  called msm_serial_hs.
++
+ config SERIAL_BCM_BT_LPM
+ 	tristate "Broadcom Bluetooth Low Power Mode"
+ 	depends on ARM && ARCH_MSM
+diff -u -r -N android_kernel_htc_primoc/drivers/tty/serial/Makefile android_kernel_htc_primoc.new/drivers/tty/serial/Makefile
+--- android_kernel_htc_primoc/drivers/tty/serial/Makefile	2012-10-30 01:04:36.261139935 +0100
++++ android_kernel_htc_primoc.new/drivers/tty/serial/Makefile	2012-10-30 01:01:46.641061881 +0100
+@@ -75,9 +75,11 @@
+ obj-$(CONFIG_SERIAL_ATMEL) += atmel_serial.o
+ obj-$(CONFIG_SERIAL_UARTLITE) += uartlite.o
+ obj-$(CONFIG_SERIAL_MSM) += msm_serial.o
+-obj-$(CONFIG_SERIAL_MSM_HS) += msm_serial_hs.o
++#obj-$(CONFIG_SERIAL_MSM_HS) += msm_serial_hs.o
+ obj-$(CONFIG_SERIAL_MSM_HS) += msm_serial_hs_brcm.o
+-obj-$(CONFIG_SERIAL_MSM_HS) += msm_serial_hs_ti_dc.o
++obj-$(CONFIG_SERIAL_MSM_HS_LPM) += msm_serial_hs_brcm_lpm.o
++obj-$(CONFIG_SERIAL_BCM_BT_LPM) += bcm_bt_lpm.o
++#obj-$(CONFIG_SERIAL_MSM_HS) += msm_serial_hs_ti_dc.o
+ obj-$(CONFIG_SERIAL_MSM_HS_IMC) += msm_serial_hs_imc.o
+ obj-$(CONFIG_SERIAL_MSM_HSL) += msm_serial_hs_lite.o
+ obj-$(CONFIG_MSM_SERIAL_DEBUGGER) += msm_serial_debugger.o
+diff -u -r -N android_kernel_htc_primoc/drivers/tty/serial/msm_serial_hs_brcm_lpm.c android_kernel_htc_primoc.new/drivers/tty/serial/msm_serial_hs_brcm_lpm.c
+--- android_kernel_htc_primoc/drivers/tty/serial/msm_serial_hs_brcm_lpm.c	1970-01-01 01:00:00.000000000 +0100
++++ android_kernel_htc_primoc.new/drivers/tty/serial/msm_serial_hs_brcm_lpm.c	2012-10-30 01:01:31.575054872 +0100
+@@ -0,0 +1,2570 @@
++/* drivers/serial/msm_serial_hs.c
++ *
++ * MSM 7k High speed uart driver
++ *
++ * Copyright (c) 2008 Google Inc.
++ * Copyright (c) 2007-2011, Code Aurora Forum. All rights reserved.
++ * Modified: Nick Pelly <npelly@google.com>
++ *
++ * All source code in this file is licensed under the following license
++ * except where indicated.
++ *
++ * This program is free software; you can redistribute it and/or
++ * modify it under the terms of the GNU General Public License
++ * version 2 as published by the Free Software Foundation.
++ *
++ * This program is distributed in the hope that it will be useful,
++ * but WITHOUT ANY WARRANTY; without even the implied warranty of
++ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
++ * See the GNU General Public License for more details.
++ *
++ * Has optional support for uart power management independent of linux
++ * suspend/resume:
++ *
++ * RX wakeup.
++ * UART wakeup can be triggered by RX activity (using a wakeup GPIO on the
++ * UART RX pin). This should only be used if there is not a wakeup
++ * GPIO on the UART CTS, and the first RX byte is known (for example, with the
++ * Bluetooth Texas Instruments HCILL protocol), since the first RX byte will
++ * always be lost. RTS will be asserted even while the UART is off in this mode
++ * of operation. See msm_serial_hs_platform_data.rx_wakeup_irq.
++ */
++
++#include <linux/module.h>
++
++#include <linux/serial.h>
++#include <linux/serial_core.h>
++#include <linux/slab.h>
++#include <linux/init.h>
++#include <linux/interrupt.h>
++#include <linux/irq.h>
++#include <linux/io.h>
++#include <linux/ioport.h>
++#include <linux/kernel.h>
++#include <linux/timer.h>
++#include <linux/clk.h>
++#include <linux/platform_device.h>
++#include <linux/pm_runtime.h>
++#include <linux/dma-mapping.h>
++#include <linux/dmapool.h>
++#include <linux/wait.h>
++#include <linux/sysfs.h>
++#include <linux/stat.h>
++#include <linux/device.h>
++#include <linux/wakelock.h>
++#include <linux/workqueue.h>
++
++#include <linux/atomic.h>
++#include <linux/irq.h>
++#include <asm/system.h>
++
++#include <mach/hardware.h>
++#include <mach/dma.h>
++#include <mach/msm_serial_hs.h>
++/* for brcm */
++#include <linux/gpio.h>
++#include <linux/uaccess.h>
++
++#include "msm_serial_hs_hwreg.h"
++
++#include <linux/poison.h>
++#include <linux/delay.h>
++
++static int hs_serial_debug_mask = 1;
++module_param_named(debug_mask, hs_serial_debug_mask,
++		   int, S_IRUGO | S_IWUSR | S_IWGRP);
++
++/* tx_empty() no spin lock */
++#if defined(CONFIG_MACH_RUNNYMEDE)
++#define TX_EMPTY_NO_SPINLOCK 1
++#endif
++
++/* for brcm */
++#define USE_BCM_BT_CHIP
++#define T_LOW 0
++#define T_HIGH 1
++/* for brcm bt serial debug */
++#define BT_SERIAL_DBG
++
++
++enum flush_reason {
++	FLUSH_NONE,
++	FLUSH_DATA_READY,
++	FLUSH_DATA_INVALID,  /* values after this indicate invalid data */
++	FLUSH_IGNORE = FLUSH_DATA_INVALID,
++	FLUSH_STOP,
++	FLUSH_SHUTDOWN,
++};
++
++enum msm_hs_clk_states_e {
++	MSM_HS_CLK_PORT_OFF,     /* port not in use */
++	MSM_HS_CLK_OFF,          /* clock disabled */
++	MSM_HS_CLK_REQUEST_OFF,  /* disable after TX and RX flushed */
++	MSM_HS_CLK_ON,           /* clock enabled */
++};
++
++/* Track the forced RXSTALE flush during clock off sequence.
++ * These states are only valid during MSM_HS_CLK_REQUEST_OFF */
++enum msm_hs_clk_req_off_state_e {
++	CLK_REQ_OFF_START,
++	CLK_REQ_OFF_RXSTALE_ISSUED,
++	CLK_REQ_OFF_FLUSH_ISSUED,
++	CLK_REQ_OFF_RXSTALE_FLUSHED,
++};
++
++struct msm_hs_tx {
++	unsigned int tx_ready_int_en;  /* ok to dma more tx */
++	unsigned int dma_in_flight;    /* tx dma in progress */
++	struct msm_dmov_cmd xfer;
++	dmov_box *command_ptr;
++	u32 *command_ptr_ptr;
++	dma_addr_t mapped_cmd_ptr;
++	dma_addr_t mapped_cmd_ptr_ptr;
++	int tx_count;
++	dma_addr_t dma_base;
++	struct tasklet_struct tlet;
++	#ifdef USE_BCM_BT_CHIP	/* brcm tx wakelock */
++	struct wake_lock brcm_tx_wake_lock;
++	#endif
++};
++
++struct msm_hs_rx {
++	enum flush_reason flush;
++	struct msm_dmov_cmd xfer;
++	dma_addr_t cmdptr_dmaaddr;
++	dmov_box *command_ptr;
++	u32 *command_ptr_ptr;
++	dma_addr_t mapped_cmd_ptr;
++	wait_queue_head_t wait;
++	dma_addr_t rbuffer;
++	unsigned char *buffer;
++	unsigned int buffer_pending;
++	struct dma_pool *pool;
++	struct wake_lock wake_lock;
++	struct delayed_work flip_insert_work;
++	struct tasklet_struct tlet;
++	struct work_struct tty_work;
++	struct wake_lock brcm_rx_wake_lock;
++	unsigned int is_brcm_rx_wake_locked;
++};
++
++enum buffer_states {
++	NONE_PENDING = 0x0,
++	FIFO_OVERRUN = 0x1,
++	PARITY_ERROR = 0x2,
++	CHARS_NORMAL = 0x4,
++};
++
++/* optional low power wakeup, typically on a GPIO RX irq */
++struct msm_hs_wakeup {
++	int irq;  /* < 0 indicates low power wakeup disabled */
++	unsigned char ignore;  /* bool */
++
++	/* bool: inject char into rx tty on wakeup */
++	unsigned char inject_rx;
++	char rx_to_inject;
++};
++
++struct msm_hs_port {
++	struct uart_port uport;
++	unsigned long imr_reg;  /* shadow value of UARTDM_IMR */
++	struct clk *clk;
++	struct clk *pclk;
++	struct msm_hs_tx tx;
++	struct msm_hs_rx rx;
++	/* gsbi uarts have to do additional writes to gsbi memory */
++	/* block and top control status block. The following pointers */
++	/* keep a handle to these blocks. */
++	unsigned char __iomem	*mapped_gsbi;
++	int dma_tx_channel;
++	int dma_rx_channel;
++	int dma_tx_crci;
++	int dma_rx_crci;
++	struct hrtimer clk_off_timer;  /* to poll TXEMT before clock off */
++	ktime_t clk_off_delay;
++	enum msm_hs_clk_states_e clk_state;
++	enum msm_hs_clk_req_off_state_e clk_req_off_state;
++
++	struct msm_hs_wakeup wakeup;
++	/* optional callback to exit low power mode */
++	void (*exit_lpm_cb)(struct uart_port *);
++
++	struct wake_lock dma_wake_lock;  /* held while any DMA active */
++
++	#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++	unsigned char bt_wakeup_pin_supported;
++	unsigned char bt_wakeup_pin;
++	unsigned char bt_wakeup_level;
++	unsigned char bt_wakeup_assert_inadvance;
++	unsigned char host_wakeup_pin;
++	unsigned char host_wakeup_level;
++	unsigned char host_want_sleep;
++	int request_clk_off_delay;
++	#endif
++};
++
++#define MSM_UARTDM_BURST_SIZE 16   /* DM burst size (in bytes) */
++#define UARTDM_TX_BUF_SIZE UART_XMIT_SIZE
++#define UARTDM_RX_BUF_SIZE 512
++#define RETRY_TIMEOUT 5
++#define UARTDM_NR 2
++
++static struct msm_hs_port q_uart_port[UARTDM_NR];
++static struct platform_driver msm_serial_hs_platform_driver;
++static struct uart_driver msm_hs_driver;
++static struct uart_ops msm_hs_ops;
++static struct workqueue_struct *msm_hs_workqueue;
++
++#define UARTDM_TO_MSM(uart_port) \
++	container_of((uart_port), struct msm_hs_port, uport)
++
++static ssize_t show_clock(struct device *dev, struct device_attribute *attr,
++			  char *buf)
++{
++#if 0
++	int state = 1;
++	enum msm_hs_clk_states_e clk_state;
++	unsigned long flags;
++
++	struct platform_device *pdev = container_of(dev, struct
++						    platform_device, dev);
++	struct msm_hs_port *msm_uport = &q_uart_port[pdev->id];
++
++	spin_lock_irqsave(&msm_uport->uport.lock, flags);
++	clk_state = msm_uport->clk_state;
++	spin_unlock_irqrestore(&msm_uport->uport.lock, flags);
++
++	if (clk_state <= MSM_HS_CLK_OFF)
++		state = 0;
++
++	return snprintf(buf, PAGE_SIZE, "%d\n", state);
++#else
++	return 0;
++#endif
++}
++
++static ssize_t set_clock(struct device *dev, struct device_attribute *attr,
++			 const char *buf, size_t count)
++{
++#if 0
++	int state;
++	struct platform_device *pdev = container_of(dev, struct
++						    platform_device, dev);
++	struct msm_hs_port *msm_uport = &q_uart_port[pdev->id];
++
++	state = buf[0] - '0';
++	switch (state) {
++	case 0: {
++		msm_hs_request_clock_off(&msm_uport->uport);
++		break;
++	}
++	case 1: {
++		msm_hs_request_clock_on(&msm_uport->uport);
++		break;
++	}
++	default: {
++		return -EINVAL;
++	}
++	}
++	return count;
++#else
++	return 0;
++#endif
++}
++
++static DEVICE_ATTR(clock, S_IWUSR | S_IRUGO, show_clock, set_clock);
++
++static inline unsigned int use_low_power_wakeup(struct msm_hs_port *msm_uport)
++{
++	return (msm_uport->wakeup.irq > 0);
++}
++
++static inline int is_gsbi_uart(struct msm_hs_port *msm_uport)
++{
++	/* assume gsbi uart if gsbi resource found in pdata */
++	return ((msm_uport->mapped_gsbi != NULL));
++}
++
++static inline unsigned int msm_hs_read(struct uart_port *uport,
++				       unsigned int offset)
++{
++	return readl_relaxed(uport->membase + offset);
++}
++
++static inline void msm_hs_write(struct uart_port *uport, unsigned int offset,
++				 unsigned int value)
++{
++	writel_relaxed(value, uport->membase + offset);
++}
++
++static void msm_hs_release_port(struct uart_port *port)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(port);
++	struct platform_device *pdev = to_platform_device(port->dev);
++	struct resource *gsbi_resource;
++	resource_size_t size;
++
++	if (is_gsbi_uart(msm_uport)) {
++		iowrite32(GSBI_PROTOCOL_IDLE, msm_uport->mapped_gsbi +
++			  GSBI_CONTROL_ADDR);
++		gsbi_resource = platform_get_resource_byname(pdev,
++							     IORESOURCE_MEM,
++							     "gsbi_resource");
++		if (gsbi_resource == NULL) {
++			printk(KERN_ERR "Can't get GSBI RES\n");
++			return;
++		}
++		size = gsbi_resource->end - gsbi_resource->start + 1;
++		release_mem_region(gsbi_resource->start, size);
++		iounmap(msm_uport->mapped_gsbi);
++		msm_uport->mapped_gsbi = NULL;
++	}
++}
++
++static int msm_hs_request_port(struct uart_port *port)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(port);
++	struct platform_device *pdev = to_platform_device(port->dev);
++	struct resource *gsbi_resource;
++	resource_size_t size;
++
++	gsbi_resource = platform_get_resource_byname(pdev,
++						     IORESOURCE_MEM,
++						     "gsbi_resource");
++
++	if (gsbi_resource) {
++		size = gsbi_resource->end - gsbi_resource->start + 1;
++		if (unlikely(!request_mem_region(gsbi_resource->start, size,
++						 "msm_serial_hs")))
++			return -EBUSY;
++		msm_uport->mapped_gsbi = ioremap(gsbi_resource->start,
++						 size);
++		if (!msm_uport->mapped_gsbi) {
++			release_mem_region(gsbi_resource->start, size);
++			return -EBUSY;
++		}
++	}
++	/* no gsbi uart */
++	return 0;
++}
++
++static int __devexit msm_hs_remove(struct platform_device *pdev)
++{
++
++	struct msm_hs_port *msm_uport;
++	struct device *dev;
++
++	if (pdev->id < 0 || pdev->id >= UARTDM_NR) {
++		printk(KERN_ERR "[BT]Invalid plaform device ID = %d\n",
++				pdev->id);
++		return -EINVAL;
++	}
++
++	msm_uport = &q_uart_port[pdev->id];
++	dev = msm_uport->uport.dev;
++
++	sysfs_remove_file(&pdev->dev.kobj, &dev_attr_clock.attr);
++
++	dma_unmap_single(dev, msm_uport->rx.mapped_cmd_ptr, sizeof(dmov_box),
++			 DMA_TO_DEVICE);
++	dma_pool_free(msm_uport->rx.pool, msm_uport->rx.buffer,
++		      msm_uport->rx.rbuffer);
++	dma_pool_destroy(msm_uport->rx.pool);
++
++	dma_unmap_single(dev, msm_uport->rx.cmdptr_dmaaddr, sizeof(u32 *),
++			 DMA_TO_DEVICE);
++	dma_unmap_single(dev, msm_uport->tx.mapped_cmd_ptr_ptr, sizeof(u32 *),
++			 DMA_TO_DEVICE);
++	dma_unmap_single(dev, msm_uport->tx.mapped_cmd_ptr, sizeof(dmov_box),
++			 DMA_TO_DEVICE);
++
++	/* destroy tx wakelock */
++	wake_lock_destroy(&msm_uport->tx.brcm_tx_wake_lock);
++	/* destroy rx wakelock */
++	wake_lock_destroy(&msm_uport->rx.brcm_rx_wake_lock);
++
++	wake_lock_destroy(&msm_uport->rx.wake_lock);
++	wake_lock_destroy(&msm_uport->dma_wake_lock);
++
++	uart_remove_one_port(&msm_hs_driver, &msm_uport->uport);
++	clk_put(msm_uport->clk);
++
++	/* Free the tx resources */
++	kfree(msm_uport->tx.command_ptr);
++	kfree(msm_uport->tx.command_ptr_ptr);
++
++	/* Free the rx resources */
++	kfree(msm_uport->rx.command_ptr);
++	kfree(msm_uport->rx.command_ptr_ptr);
++
++	iounmap(msm_uport->uport.membase);
++
++	return 0;
++}
++
++static int msm_hs_init_clk(struct uart_port *uport)
++{
++	int ret;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	wake_lock(&msm_uport->dma_wake_lock);
++	/* Set up the MREG/NREG/DREG/MNDREG */
++	ret = clk_set_rate(msm_uport->clk, uport->uartclk);
++	if (ret) {
++		printk(KERN_WARNING "[BT]Error setting clock rate on UART\n");
++		return ret;
++	}
++
++	ret = clk_enable(msm_uport->clk);
++	if (ret) {
++		printk(KERN_ERR "[BT]Error could not turn on UART clk\n");
++		return ret;
++	}
++	if (msm_uport->pclk) {
++		ret = clk_enable(msm_uport->pclk);
++		if (ret) {
++			dev_err(uport->dev,
++				"[BT]Error could not turn on UART pclk\n");
++			return ret;
++		}
++	}
++
++	msm_uport->clk_state = MSM_HS_CLK_ON;
++
++	return 0;
++}
++
++/*
++ * programs the UARTDM_CSR register with correct bit rates
++ *
++ * Interrupts should be disabled before we are called, as
++ * we modify Set Baud rate
++ * Set receive stale interrupt level, dependant on Bit Rate
++ * Goal is to have around 8 ms before indicate stale.
++ * roundup (((Bit Rate * .008) / 10) + 1
++ */
++static void msm_hs_set_bps_locked(struct uart_port *uport,
++			       unsigned int bps)
++{
++	unsigned long rxstale;
++	unsigned long data;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	switch (bps) {
++	case 300:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x00);
++		rxstale = 1;
++		break;
++	case 600:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x11);
++		rxstale = 1;
++		break;
++	case 1200:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x22);
++		rxstale = 1;
++		break;
++	case 2400:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x33);
++		rxstale = 1;
++		break;
++	case 4800:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x44);
++		rxstale = 1;
++		break;
++	case 9600:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x55);
++		rxstale = 2;
++		break;
++	case 14400:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x66);
++		rxstale = 3;
++		break;
++	case 19200:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x77);
++		rxstale = 4;
++		break;
++	case 28800:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x88);
++		rxstale = 6;
++		break;
++	case 38400:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x99);
++		rxstale = 8;
++		break;
++	case 57600:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xaa);
++		rxstale = 16;
++		break;
++	case 76800:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xbb);
++		rxstale = 16;
++		break;
++	case 115200:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xcc);
++		rxstale = 31;
++		break;
++	case 230400:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xee);
++		rxstale = 31;
++		break;
++	case 460800:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xff);
++		rxstale = 31;
++		break;
++	case 4000000:
++	case 3686400:
++	case 3200000:
++	case 3500000:
++	case 3000000:
++	case 2500000:
++	case 1500000:
++	case 1152000:
++	case 1000000:
++	case 921600:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xff);
++		rxstale = 31;
++		break;
++	default:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xff);
++		/* default to 9600 */
++		bps = 9600;
++		rxstale = 2;
++		break;
++	}
++	/*
++	 * uart baud rate depends on CSR and MND Values
++	 * we are updating CSR before and then calling
++	 * clk_set_rate which updates MND Values. Hence
++	 * dsb requires here.
++	 */
++	mb();
++	if (bps > 460800)
++		uport->uartclk = bps * 16;
++	else
++		uport->uartclk = 7372800;
++
++	if (clk_set_rate(msm_uport->clk, uport->uartclk)) {
++		printk(KERN_WARNING "[BT]Error setting clock rate on UART\n");
++		return;
++	}
++
++	data = rxstale & UARTDM_IPR_STALE_LSB_BMSK;
++	data |= UARTDM_IPR_STALE_TIMEOUT_MSB_BMSK & (rxstale << 2);
++
++	msm_hs_write(uport, UARTDM_IPR_ADDR, data);
++	/*
++	 * It is suggested to do reset of transmitter and receiver after
++	 * changing any protocol configuration. Here Baud rate and stale
++	 * timeout are getting updated. Hence reset transmitter and receiver.
++	 */
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_TX);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_RX);
++}
++
++
++static void msm_hs_set_std_bps_locked(struct uart_port *uport,
++			       unsigned int bps)
++{
++	unsigned long rxstale;
++	unsigned long data;
++
++	switch (bps) {
++	case 9600:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x99);
++		rxstale = 2;
++		break;
++	case 14400:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xaa);
++		rxstale = 3;
++		break;
++	case 19200:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xbb);
++		rxstale = 4;
++		break;
++	case 28800:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xcc);
++		rxstale = 6;
++		break;
++	case 38400:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xdd);
++		rxstale = 8;
++		break;
++	case 57600:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xee);
++		rxstale = 16;
++		break;
++	case 115200:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0xff);
++		rxstale = 31;
++		break;
++	default:
++		msm_hs_write(uport, UARTDM_CSR_ADDR, 0x99);
++		/* default to 9600 */
++		bps = 9600;
++		rxstale = 2;
++		break;
++	}
++
++	data = rxstale & UARTDM_IPR_STALE_LSB_BMSK;
++	data |= UARTDM_IPR_STALE_TIMEOUT_MSB_BMSK & (rxstale << 2);
++
++	msm_hs_write(uport, UARTDM_IPR_ADDR, data);
++}
++
++/*
++ * termios :  new ktermios
++ * oldtermios:  old ktermios previous setting
++ *
++ * Configure the serial port
++ */
++static void msm_hs_set_termios(struct uart_port *uport,
++				   struct ktermios *termios,
++				   struct ktermios *oldtermios)
++{
++	unsigned int bps;
++	unsigned long data;
++	unsigned long flags;
++	unsigned int c_cflag = termios->c_cflag;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	spin_lock_irqsave(&uport->lock, flags);
++	clk_enable(msm_uport->clk);
++
++	/*
++	 * Disable Rx channel of UARTDM
++	 * DMA Rx Stall happens if enqueue and flush of Rx command happens
++	 * concurrently. Hence before changing the baud rate/protocol
++	 * configuration and sending flush command to ADM, disable the Rx
++	 * channel of UARTDM.
++	 * Note: should not reset the receiver here immediately as it is not
++	 * suggested to do disable/reset or reset/disable at the same time.
++	 */
++	data = msm_hs_read(uport, UARTDM_DMEN_ADDR);
++	data &= ~UARTDM_RX_DM_EN_BMSK;
++	msm_hs_write(uport, UARTDM_DMEN_ADDR, data);
++
++	/* 300 is the minimum baud support by the driver  */
++	bps = uart_get_baud_rate(uport, termios, oldtermios, 200, 4000000);
++
++	/* Temporary remapping  200 BAUD to 3.2 mbps */
++	if (bps == 200)
++		bps = 3200000;
++
++	uport->uartclk = clk_get_rate(msm_uport->clk);
++	if (!uport->uartclk)
++		msm_hs_set_std_bps_locked(uport, bps);
++	else
++		msm_hs_set_bps_locked(uport, bps);
++
++	data = msm_hs_read(uport, UARTDM_MR2_ADDR);
++	data &= ~UARTDM_MR2_PARITY_MODE_BMSK;
++	/* set parity */
++	if (PARENB == (c_cflag & PARENB)) {
++		if (PARODD == (c_cflag & PARODD))
++			data |= ODD_PARITY;
++		else if (CMSPAR == (c_cflag & CMSPAR))
++			data |= SPACE_PARITY;
++		else
++			data |= EVEN_PARITY;
++	}
++
++	/* Set bits per char */
++	data &= ~UARTDM_MR2_BITS_PER_CHAR_BMSK;
++
++	switch (c_cflag & CSIZE) {
++	case CS5:
++		data |= FIVE_BPC;
++		break;
++	case CS6:
++		data |= SIX_BPC;
++		break;
++	case CS7:
++		data |= SEVEN_BPC;
++		break;
++	default:
++		data |= EIGHT_BPC;
++		break;
++	}
++	/* stop bits */
++	if (c_cflag & CSTOPB) {
++		data |= STOP_BIT_TWO;
++	} else {
++		/* otherwise 1 stop bit */
++		data |= STOP_BIT_ONE;
++	}
++	data |= UARTDM_MR2_ERROR_MODE_BMSK;
++	/* write parity/bits per char/stop bit configuration */
++	msm_hs_write(uport, UARTDM_MR2_ADDR, data);
++
++	/* Configure HW flow control */
++	data = msm_hs_read(uport, UARTDM_MR1_ADDR);
++
++	data &= ~(UARTDM_MR1_CTS_CTL_BMSK | UARTDM_MR1_RX_RDY_CTL_BMSK);
++
++	if (c_cflag & CRTSCTS) {
++		data |= UARTDM_MR1_CTS_CTL_BMSK;
++		data |= UARTDM_MR1_RX_RDY_CTL_BMSK;
++	}
++
++	msm_hs_write(uport, UARTDM_MR1_ADDR, data);
++
++	uport->ignore_status_mask = termios->c_iflag & INPCK;
++	uport->ignore_status_mask |= termios->c_iflag & IGNPAR;
++	uport->read_status_mask = (termios->c_cflag & CREAD);
++
++	msm_hs_write(uport, UARTDM_IMR_ADDR, 0);
++
++	/* Set Transmit software time out */
++	uart_update_timeout(uport, c_cflag, bps);
++
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_RX);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_TX);
++
++	if (msm_uport->rx.flush == FLUSH_NONE) {
++		wake_lock(&msm_uport->rx.wake_lock);
++		msm_uport->rx.flush = FLUSH_IGNORE;
++		/*
++		 * Before using dmov APIs make sure that
++		 * previous writel are completed. Hence
++		 * dsb requires here.
++		 */
++		mb();
++		/* do discard flush */
++		msm_dmov_stop_cmd(msm_uport->dma_rx_channel,
++				  &msm_uport->rx.xfer, 0);
++	}
++
++	msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++	/* calling other hardware component here clk_disable API. */
++	mb();
++	clk_disable(msm_uport->clk);
++	spin_unlock_irqrestore(&uport->lock, flags);
++}
++
++/*
++ *  Standard API, Transmitter
++ *  Any character in the transmit shift register is sent
++ */
++unsigned int brcm_msm_hs_tx_empty(struct uart_port *uport)
++{
++	unsigned int data;
++	unsigned int ret = 0;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++#ifndef TX_EMPTY_NO_SPINLOCK
++	unsigned long flags;
++	spin_lock_irqsave(&uport->lock, flags);
++#endif
++	clk_enable(msm_uport->clk);
++
++	data = msm_hs_read(uport, UARTDM_SR_ADDR);
++	if (data & UARTDM_SR_TXEMT_BMSK)
++		ret = TIOCSER_TEMT;
++
++	clk_disable(msm_uport->clk);
++#ifndef TX_EMPTY_NO_SPINLOCK
++	spin_unlock_irqrestore(&uport->lock, flags);
++#endif
++	return ret;
++}
++
++/*
++ *  Standard API, Stop transmitter.
++ *  Any character in the transmit shift register is sent as
++ *  well as the current data mover transfer .
++ */
++static void msm_hs_stop_tx_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	msm_uport->tx.tx_ready_int_en = 0;
++}
++
++/*
++ *  Standard API, Stop receiver as soon as possible.
++ *
++ *  Function immediately terminates the operation of the
++ *  channel receiver and any incoming characters are lost. None
++ *  of the receiver status bits are affected by this command and
++ *  characters that are already in the receive FIFO there.
++ */
++static void msm_hs_stop_rx_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	unsigned int data;
++
++	clk_enable(msm_uport->clk);
++
++	/* disable dlink */
++	data = msm_hs_read(uport, UARTDM_DMEN_ADDR);
++	data &= ~UARTDM_RX_DM_EN_BMSK;
++	msm_hs_write(uport, UARTDM_DMEN_ADDR, data);
++
++	/* calling DMOV or CLOCK API. Hence mb() */
++	mb();
++	/* Disable the receiver */
++	if (msm_uport->rx.flush == FLUSH_NONE) {
++		wake_lock(&msm_uport->rx.wake_lock);
++		/* do discard flush */
++		msm_dmov_stop_cmd(msm_uport->dma_rx_channel,
++				  &msm_uport->rx.xfer, 0);
++	}
++	if (msm_uport->rx.flush != FLUSH_SHUTDOWN)
++		msm_uport->rx.flush = FLUSH_STOP;
++
++	clk_disable(msm_uport->clk);
++}
++
++/*  Transmit the next chunk of data */
++static void msm_hs_submit_tx_locked(struct uart_port *uport)
++{
++	int left;
++	int tx_count;
++	int aligned_tx_count;
++	dma_addr_t src_addr;
++	dma_addr_t aligned_src_addr;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	struct msm_hs_tx *tx = &msm_uport->tx;
++	struct circ_buf *tx_buf = &msm_uport->uport.state->xmit;
++
++	if (uart_circ_empty(tx_buf) || uport->state->port.tty->stopped) {
++		msm_hs_stop_tx_locked(uport);
++		return;
++	}
++
++	tx->dma_in_flight = 1;
++
++	tx_count = uart_circ_chars_pending(tx_buf);
++
++	if (UARTDM_TX_BUF_SIZE < tx_count)
++		tx_count = UARTDM_TX_BUF_SIZE;
++
++	left = UART_XMIT_SIZE - tx_buf->tail;
++
++	if (tx_count > left)
++		tx_count = left;
++
++	src_addr = tx->dma_base + tx_buf->tail;
++	/* Mask the src_addr to align on a cache
++	 * and add those bytes to tx_count */
++	aligned_src_addr = src_addr & ~(dma_get_cache_alignment() - 1);
++	aligned_tx_count = tx_count + src_addr - aligned_src_addr;
++
++	dma_sync_single_for_device(uport->dev, aligned_src_addr,
++			aligned_tx_count, DMA_TO_DEVICE);
++
++	tx->command_ptr->num_rows = (((tx_count + 15) >> 4) << 16) |
++				     ((tx_count + 15) >> 4);
++	tx->command_ptr->src_row_addr = src_addr;
++
++	dma_sync_single_for_device(uport->dev, tx->mapped_cmd_ptr,
++				   sizeof(dmov_box), DMA_TO_DEVICE);
++
++	*tx->command_ptr_ptr = CMD_PTR_LP | DMOV_CMD_ADDR(tx->mapped_cmd_ptr);
++
++	/* Save tx_count to use in Callback */
++	tx->tx_count = tx_count;
++	msm_hs_write(uport, UARTDM_NCF_TX_ADDR, tx_count);
++
++	/* Disable the tx_ready interrupt */
++	msm_uport->imr_reg &= ~UARTDM_ISR_TX_READY_BMSK;
++	msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++	/* Calling next DMOV API. Hence mb() here. */
++	mb();
++
++	dma_sync_single_for_device(uport->dev, tx->mapped_cmd_ptr_ptr,
++				   sizeof(u32 *), DMA_TO_DEVICE);
++
++	if ((tx->xfer.list.next == LIST_POISON1)
++			||	(tx->xfer.list.next == NULL))
++		msm_dmov_enqueue_cmd(msm_uport->dma_tx_channel, &tx->xfer);
++	else
++		printk(KERN_ERR "[BT]Error: tx already started in dmov\n");
++}
++
++/* Start to receive the next chunk of data */
++static void msm_hs_start_rx_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	unsigned int buffer_pending = msm_uport->rx.buffer_pending;
++	unsigned int data;
++
++	msm_uport->rx.buffer_pending = 0;
++	if (buffer_pending && hs_serial_debug_mask)
++		printk(KERN_ERR "[BT]Error: rx started in buffer state = %x",
++		       buffer_pending);
++
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_STALE_INT);
++	msm_hs_write(uport, UARTDM_DMRX_ADDR, UARTDM_RX_BUF_SIZE);
++	msm_hs_write(uport, UARTDM_CR_ADDR, STALE_EVENT_ENABLE);
++	msm_uport->imr_reg |= UARTDM_ISR_RXLEV_BMSK;
++
++	/*
++	 * Enable UARTDM Rx Interface as previously it has been
++	 * disable in set_termios before configuring baud rate.
++	 */
++	data = msm_hs_read(uport, UARTDM_DMEN_ADDR);
++	data |= UARTDM_RX_DM_EN_BMSK;
++	msm_hs_write(uport, UARTDM_DMEN_ADDR, data);
++	msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++	/* Calling next DMOV API. Hence mb() here. */
++	mb();
++
++	msm_uport->rx.flush = FLUSH_NONE;
++
++	if ((msm_uport->rx.xfer.list.next == LIST_POISON1)
++			|| (msm_uport->rx.xfer.list.next == NULL))
++		msm_dmov_enqueue_cmd(msm_uport->dma_rx_channel,
++				&msm_uport->rx.xfer);
++	else
++		printk(KERN_ERR "[BT]Error: rx already started in dmov\n");
++
++}
++
++static void flip_insert_work(struct work_struct *work)
++{
++	unsigned long flags;
++	int retval;
++	struct msm_hs_port *msm_uport =
++		container_of(work, struct msm_hs_port,
++			     rx.flip_insert_work.work);
++	struct tty_struct *tty = msm_uport->uport.state->port.tty;
++
++	spin_lock_irqsave(&msm_uport->uport.lock, flags);
++	if (msm_uport->rx.buffer_pending == NONE_PENDING) {
++		if (hs_serial_debug_mask)
++			printk(KERN_ERR "[BT]Error: No buffer pending in %s",
++			       __func__);
++		return;
++	}
++	if (msm_uport->rx.buffer_pending & FIFO_OVERRUN) {
++		retval = tty_insert_flip_char(tty, 0, TTY_OVERRUN);
++		if (retval)
++			msm_uport->rx.buffer_pending &= ~FIFO_OVERRUN;
++	}
++	if (msm_uport->rx.buffer_pending & PARITY_ERROR) {
++		retval = tty_insert_flip_char(tty, 0, TTY_PARITY);
++		if (retval)
++			msm_uport->rx.buffer_pending &= ~PARITY_ERROR;
++	}
++	if (msm_uport->rx.buffer_pending & CHARS_NORMAL) {
++		int rx_count, rx_offset;
++		rx_count = (msm_uport->rx.buffer_pending & 0xFFFF0000) >> 16;
++		rx_offset = (msm_uport->rx.buffer_pending & 0xFFD0) >> 5;
++		retval = tty_insert_flip_string(tty, msm_uport->rx.buffer +
++						rx_offset, rx_count);
++		msm_uport->rx.buffer_pending &= (FIFO_OVERRUN |
++						 PARITY_ERROR);
++		if (retval != rx_count)
++			msm_uport->rx.buffer_pending |= CHARS_NORMAL |
++				retval << 8 | (rx_count - retval) << 16;
++	}
++	if (msm_uport->rx.buffer_pending)
++		schedule_delayed_work(&msm_uport->rx.flip_insert_work,
++				      msecs_to_jiffies(RETRY_TIMEOUT));
++	else
++		if ((msm_uport->clk_state == MSM_HS_CLK_ON) &&
++		    (msm_uport->rx.flush <= FLUSH_IGNORE)) {
++			if (hs_serial_debug_mask)
++				printk(KERN_WARNING
++				       "[BT]msm_serial_hs: "
++				       "Pending buffers cleared. "
++				       "Restarting\n");
++			msm_hs_start_rx_locked(&msm_uport->uport);
++		}
++	spin_unlock_irqrestore(&msm_uport->uport.lock, flags);
++	tty_flip_buffer_push(tty);
++}
++
++static void msm_serial_hs_rx_tlet(unsigned long tlet_ptr)
++{
++	int retval;
++	int rx_count;
++	unsigned long status;
++	unsigned long flags;
++	unsigned int error_f = 0;
++	struct uart_port *uport;
++	struct msm_hs_port *msm_uport;
++	unsigned int flush;
++	struct tty_struct *tty;
++
++	msm_uport = container_of((struct tasklet_struct *)tlet_ptr,
++				 struct msm_hs_port, rx.tlet);
++	uport = &msm_uport->uport;
++	tty = uport->state->port.tty;
++
++	status = msm_hs_read(uport, UARTDM_SR_ADDR);
++
++	spin_lock_irqsave(&uport->lock, flags);
++
++	clk_enable(msm_uport->clk);
++	msm_hs_write(uport, UARTDM_CR_ADDR, STALE_EVENT_DISABLE);
++
++	/* overflow is not connect to data in a FIFO */
++	if (unlikely((status & UARTDM_SR_OVERRUN_BMSK) &&
++		     (uport->read_status_mask & CREAD))) {
++		retval = tty_insert_flip_char(tty, 0, TTY_OVERRUN);
++		if (!retval)
++			msm_uport->rx.buffer_pending |= TTY_OVERRUN;
++		uport->icount.buf_overrun++;
++		error_f = 1;
++	}
++
++	if (!(uport->ignore_status_mask & INPCK))
++		status = status & ~(UARTDM_SR_PAR_FRAME_BMSK);
++
++	if (unlikely(status & UARTDM_SR_PAR_FRAME_BMSK)) {
++		/* Can not tell difference between parity & frame error */
++		uport->icount.parity++;
++		error_f = 1;
++		if (uport->ignore_status_mask & IGNPAR) {
++			retval = tty_insert_flip_char(tty, 0, TTY_PARITY);
++			if (!retval)
++				msm_uport->rx.buffer_pending |= TTY_PARITY;
++		}
++	}
++
++	if (error_f)
++		msm_hs_write(uport, UARTDM_CR_ADDR, RESET_ERROR_STATUS);
++
++	if (msm_uport->clk_req_off_state == CLK_REQ_OFF_FLUSH_ISSUED)
++		msm_uport->clk_req_off_state = CLK_REQ_OFF_RXSTALE_FLUSHED;
++	flush = msm_uport->rx.flush;
++	if (flush == FLUSH_IGNORE)
++		if (!msm_uport->rx.buffer_pending)
++			msm_hs_start_rx_locked(uport);
++
++	if (flush == FLUSH_STOP) {
++		msm_uport->rx.flush = FLUSH_SHUTDOWN;
++		wake_up(&msm_uport->rx.wait);
++	}
++	if (flush >= FLUSH_DATA_INVALID)
++		goto out;
++
++	rx_count = msm_hs_read(uport, UARTDM_RX_TOTAL_SNAP_ADDR);
++
++	/* order the read of rx.buffer */
++	rmb();
++
++	if (0 != (uport->read_status_mask & CREAD)) {
++		retval = tty_insert_flip_string(tty, msm_uport->rx.buffer,
++						rx_count);
++		if (retval != rx_count) {
++			msm_uport->rx.buffer_pending |= CHARS_NORMAL |
++				retval << 5 | (rx_count - retval) << 16;
++		}
++	}
++
++	/* order the read of rx.buffer and the start of next rx xfer */
++	wmb();
++
++	if (!msm_uport->rx.buffer_pending)
++		msm_hs_start_rx_locked(uport);
++
++out:
++	if (msm_uport->rx.buffer_pending) {
++		if (hs_serial_debug_mask)
++			printk(KERN_WARNING
++			       "[BT]msm_serial_hs: "
++			       "tty buffer exhausted. "
++			       "Stalling\n");
++		schedule_delayed_work(&msm_uport->rx.flip_insert_work
++				      , msecs_to_jiffies(RETRY_TIMEOUT));
++	}
++	clk_disable(msm_uport->clk);
++	/* release wakelock in 500ms, not immediately, because higher layers
++	 * don't always take wakelocks when they should */
++	wake_lock_timeout(&msm_uport->rx.wake_lock, HZ / 2);
++	/* tty_flip_buffer_push() might call msm_hs_start(), so unlock */
++	spin_unlock_irqrestore(&uport->lock, flags);
++	if (flush < FLUSH_DATA_INVALID)
++		queue_work(msm_hs_workqueue, &msm_uport->rx.tty_work);
++}
++
++/* Enable the transmitter Interrupt */
++static void msm_hs_start_tx_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	clk_enable(msm_uport->clk);
++
++
++	if (msm_uport->exit_lpm_cb)
++		msm_uport->exit_lpm_cb(uport);
++
++	if (msm_uport->tx.tx_ready_int_en == 0) {
++		msm_uport->tx.tx_ready_int_en = 1;
++		if (msm_uport->tx.dma_in_flight == 0)
++			msm_hs_submit_tx_locked(uport);
++	}
++
++	clk_disable(msm_uport->clk);
++}
++
++/*
++ *  This routine is called when we are done with a DMA transfer
++ *
++ *  This routine is registered with Data mover when we set
++ *  up a Data Mover transfer. It is called from Data mover ISR
++ *  when the DMA transfer is done.
++ */
++static void msm_hs_dmov_tx_callback(struct msm_dmov_cmd *cmd_ptr,
++					unsigned int result,
++					struct msm_dmov_errdata *err)
++{
++	struct msm_hs_port *msm_uport;
++
++	WARN_ON(result != 0x80000002);  /* DMA did not finish properly */
++
++	msm_uport = container_of(cmd_ptr, struct msm_hs_port, tx.xfer);
++
++	tasklet_schedule(&msm_uport->tx.tlet);
++}
++
++static void msm_serial_hs_tx_tlet(unsigned long tlet_ptr)
++{
++	unsigned long flags;
++	struct msm_hs_port *msm_uport = container_of((struct tasklet_struct *)
++				tlet_ptr, struct msm_hs_port, tx.tlet);
++
++	spin_lock_irqsave(&(msm_uport->uport.lock), flags);
++	clk_enable(msm_uport->clk);
++
++	msm_uport->imr_reg |= UARTDM_ISR_TX_READY_BMSK;
++	msm_hs_write(&(msm_uport->uport), UARTDM_IMR_ADDR, msm_uport->imr_reg);
++	/* Calling clk API. Hence mb() requires. */
++	mb();
++
++	clk_disable(msm_uport->clk);
++	spin_unlock_irqrestore(&(msm_uport->uport.lock), flags);
++}
++
++/*
++ * This routine is called when we are done with a DMA transfer or the
++ * a flush has been sent to the data mover driver.
++ *
++ * This routine is registered with Data mover when we set up a Data Mover
++ *  transfer. It is called from Data mover ISR when the DMA transfer is done.
++ */
++static void msm_hs_dmov_rx_callback(struct msm_dmov_cmd *cmd_ptr,
++					unsigned int result,
++					struct msm_dmov_errdata *err)
++{
++	struct msm_hs_port *msm_uport;
++
++	msm_uport = container_of(cmd_ptr, struct msm_hs_port, rx.xfer);
++
++	tasklet_schedule(&msm_uport->rx.tlet);
++}
++
++static void msm_hs_tty_flip_buffer_work(struct work_struct *work)
++{
++	struct msm_hs_port *msm_uport =
++			container_of(work, struct msm_hs_port, rx.tty_work);
++	struct tty_struct *tty = msm_uport->uport.state->port.tty;
++
++	tty_flip_buffer_push(tty);
++}
++
++/*
++ *  Standard API, Current states of modem control inputs
++ *
++ * Since CTS can be handled entirely by HARDWARE we always
++ * indicate clear to send and count on the TX FIFO to block when
++ * it fills up.
++ *
++ * - TIOCM_DCD
++ * - TIOCM_CTS
++ * - TIOCM_DSR
++ * - TIOCM_RI
++ *  (Unsupported) DCD and DSR will return them high. RI will return low.
++ */
++static unsigned int msm_hs_get_mctrl_locked(struct uart_port *uport)
++{
++	return TIOCM_DSR | TIOCM_CAR | TIOCM_CTS;
++}
++
++/*
++ *  Standard API, Set or clear RFR_signal
++ *
++ * Set RFR high, (Indicate we are not ready for data), we disable auto
++ * ready for receiving and then set RFR_N high. To set RFR to low we just turn
++ * back auto ready for receiving and it should lower RFR signal
++ * when hardware is ready
++ */
++static void msm_hs_set_mctrl_locked(struct uart_port *uport,
++				    unsigned int mctrl)
++{
++	unsigned int set_rts;
++	unsigned int data;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	clk_enable(msm_uport->clk);
++
++	/* RTS is active low */
++	set_rts = TIOCM_RTS & mctrl ? 0 : 1;
++
++	data = msm_hs_read(uport, UARTDM_MR1_ADDR);
++	if (set_rts) {
++		/*disable auto ready-for-receiving */
++		data &= ~UARTDM_MR1_RX_RDY_CTL_BMSK;
++		msm_hs_write(uport, UARTDM_MR1_ADDR, data);
++		/* set RFR_N to high */
++		msm_hs_write(uport, UARTDM_CR_ADDR, RFR_HIGH);
++	} else {
++		/* Enable auto ready-for-receiving */
++		data |= UARTDM_MR1_RX_RDY_CTL_BMSK;
++		msm_hs_write(uport, UARTDM_MR1_ADDR, data);
++	}
++	/* Calling CLOCK API. Hence mb() requires. */
++	mb();
++	clk_disable(msm_uport->clk);
++}
++
++/*
++void msm_hs_set_mctrl(struct uart_port *uport,
++				    unsigned int mctrl)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&uport->lock, flags);
++	msm_hs_set_mctrl_locked(uport, mctrl);
++	spin_unlock_irqrestore(&uport->lock, flags);
++}
++EXPORT_SYMBOL(msm_hs_set_mctrl);
++*/
++
++/* Standard API, Enable modem status (CTS) interrupt  */
++static void msm_hs_enable_ms_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	clk_enable(msm_uport->clk);
++
++	/* Enable DELTA_CTS Interrupt */
++	msm_uport->imr_reg |= UARTDM_ISR_DELTA_CTS_BMSK;
++	msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++	/* Calling CLOCK API. Hence mb() requires here. */
++	mb();
++
++	clk_disable(msm_uport->clk);
++
++}
++
++/*
++ *  Standard API, Break Signal
++ *
++ * Control the transmission of a break signal. ctl eq 0 => break
++ * signal terminate ctl ne 0 => start break signal
++ */
++static void msm_hs_break_ctl(struct uart_port *uport, int ctl)
++{
++	unsigned long flags;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	spin_lock_irqsave(&uport->lock, flags);
++	clk_enable(msm_uport->clk);
++	msm_hs_write(uport, UARTDM_CR_ADDR, ctl ? START_BREAK : STOP_BREAK);
++	/* Calling CLOCK API. Hence mb() requires here. */
++	mb();
++	clk_disable(msm_uport->clk);
++	spin_unlock_irqrestore(&uport->lock, flags);
++}
++
++static void msm_hs_config_port(struct uart_port *uport, int cfg_flags)
++{
++	/* unsigned long flags;*/
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	if (cfg_flags & UART_CONFIG_TYPE) {
++		uport->type = PORT_MSM;
++		msm_hs_request_port(uport);
++	}
++
++	/* spin_lock_irqsave(&uport->lock, flags); */
++	if (is_gsbi_uart(msm_uport)) {
++		if (msm_uport->pclk)
++			clk_enable(msm_uport->pclk);
++		iowrite32(GSBI_PROTOCOL_UART, msm_uport->mapped_gsbi +
++			  GSBI_CONTROL_ADDR);
++		if (msm_uport->pclk)
++			clk_disable(msm_uport->pclk);
++	}
++	/* spin_unlock_irqrestore(&uport->lock, flags); */
++}
++
++/*  Handle CTS changes (Called from interrupt handler) */
++static void msm_hs_handle_delta_cts_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	clk_enable(msm_uport->clk);
++
++	/* clear interrupt */
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_CTS);
++	/* Calling CLOCK API. Hence mb() requires here. */
++	mb();
++	uport->icount.cts++;
++
++	clk_disable(msm_uport->clk);
++
++	/* clear the IOCTL TIOCMIWAIT if called */
++	wake_up_interruptible(&uport->state->port.delta_msr_wait);
++}
++
++#if 0
++#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++static int read_host_wake_state(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	return gpio_get_value(msm_uport->host_wakeup_pin);
++}
++#endif
++#endif
++
++/* check if the TX path is flushed, and if so clock off
++ * returns 0 did not clock off, need to retry (still sending final byte)
++ *        -1 did not clock off, do not retry
++ *         1 if we clocked off
++ */
++static int msm_hs_check_clock_off_locked(struct uart_port *uport)
++{
++	unsigned long sr_status;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	struct circ_buf *tx_buf = &uport->state->xmit;
++
++	if (msm_uport->request_clk_off_delay > 0) {
++		msm_uport->request_clk_off_delay--;
++		return 0;  /* delay */
++	}
++
++	/* Cancel if tx tty buffer is not empty, dma is in flight,
++	 * or tx fifo is not empty, or rx fifo is not empty */
++	if (msm_uport->clk_state != MSM_HS_CLK_REQUEST_OFF ||
++		!uart_circ_empty(tx_buf) || msm_uport->tx.dma_in_flight ||
++		(msm_uport->imr_reg & UARTDM_ISR_TXLEV_BMSK) ||
++		!(msm_uport->imr_reg & UARTDM_ISR_RXLEV_BMSK)) {
++		return -1;
++	}
++
++	/* Make sure the uart is finished with the last byte */
++	sr_status = msm_hs_read(uport, UARTDM_SR_ADDR);
++	if (!(sr_status & UARTDM_SR_TXEMT_BMSK))
++		return 0;  /* retry */
++
++	#ifdef USE_BCM_BT_CHIP	/* set bt_chip_wakeup pin to high till now */
++	/* host has nothing send to bt chip, so set bt_wakeup_pin to high */
++	if (msm_uport->host_want_sleep) {
++		if ((msm_uport->bt_wakeup_level == 0)
++			|| (msm_uport->bt_wakeup_assert_inadvance == 1)) {
++			//gpio_set_value(msm_uport->bt_wakeup_pin,
++			//	T_HIGH);
++			msm_uport->bt_wakeup_level = 1;
++			msm_uport->bt_wakeup_assert_inadvance = 0;
++			#ifdef BT_SERIAL_DBG
++			printk(KERN_INFO "[BT]CHK CLK OFF, BT_WAKE=HIGH\n");
++			#endif
++		}
++	} else {
++		/* host doesn't want to sleep, so exit anyway */
++		msm_uport->clk_state = MSM_HS_CLK_ON;
++		return -1;
++	}
++
++	/* now we can start to check rx part	*/
++	/* check host_wake pin level */
++	if (msm_uport->host_wakeup_level == 0) {
++		printk(KERN_INFO "[BT]%s msm_uport->host_wakeup_level=0\n", __func__);
++		msm_uport->clk_state = MSM_HS_CLK_ON;
++		return -1;	/* host_wake is still low, no need to retry */
++	}
++#if 0 
++	else if (!read_host_wake_state(uport)) {
++		printk(KERN_INFO "[BT]%s !read_host_wake_state(uport)\n", __func__);
++
++		/* this means host wake is LOW now but isr haven't been called,
++		so retry again */
++		return 0;
++	}
++#endif 
++	else {
++
++		if (sr_status & UARTDM_SR_RXRDY_BMSK)
++			return 0;  /* some data in rx fifo, so retry */
++
++		/* bt chip has nothing to send to host, so we disable rfr */
++		{
++			unsigned int data;
++			data = msm_hs_read(uport, UARTDM_MR1_ADDR);
++
++			if (data & UARTDM_MR1_RX_RDY_CTL_BMSK) {
++				/*disable auto ready-for-receiving */
++				data &= ~UARTDM_MR1_RX_RDY_CTL_BMSK;
++				msm_hs_write(uport, UARTDM_MR1_ADDR, data);
++
++				/* set RFR_N to high */
++				msm_hs_write(uport, UARTDM_CR_ADDR, RFR_HIGH);
++				/*complete above write. hence mb() here. */
++				mb();
++				#ifdef BT_SERIAL_DBG
++				printk(KERN_INFO "[BT]- DIS RFR, %d -\n",
++						msm_uport->clk_state);
++				#endif
++			}
++		}
++	}
++	#endif
++
++	/* Make sure forced RXSTALE flush complete */
++	switch (msm_uport->clk_req_off_state) {
++	case CLK_REQ_OFF_START:
++		msm_uport->clk_req_off_state = CLK_REQ_OFF_RXSTALE_ISSUED;
++		msm_hs_write(uport, UARTDM_CR_ADDR, FORCE_STALE_EVENT);
++		/*
++		 * Before returning make sure that device writel completed.
++		 * Hence mb() requires here.
++		 */
++		mb();
++		return 0;  /* RXSTALE flush not complete - retry */
++	case CLK_REQ_OFF_RXSTALE_ISSUED:
++	case CLK_REQ_OFF_FLUSH_ISSUED:
++		return 0;  /* RXSTALE flush not complete - retry */
++	case CLK_REQ_OFF_RXSTALE_FLUSHED:
++		break;  /* continue */
++	}
++
++	if (msm_uport->rx.flush != FLUSH_SHUTDOWN) {
++		#ifdef BT_SERIAL_DBG
++		printk(KERN_INFO "[BT]CHK CLK OFF rx.flush:%d\n",
++				msm_uport->rx.flush);
++		#endif
++		if (msm_uport->rx.flush == FLUSH_NONE)
++			msm_hs_stop_rx_locked(uport);
++		return 0;  /* come back later to really clock off */
++	}
++
++	/* we really want to clock off */
++	clk_disable(msm_uport->clk);
++	if (msm_uport->pclk)
++		clk_disable(msm_uport->pclk);
++	msm_uport->clk_state = MSM_HS_CLK_OFF;
++
++	/* release rx wake lock */
++	if (msm_uport->rx.is_brcm_rx_wake_locked == 1) {
++		wake_unlock(&msm_uport->rx.brcm_rx_wake_lock);
++		msm_uport->rx.is_brcm_rx_wake_locked = 0;
++	}
++
++	#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++	#ifdef BT_SERIAL_DBG
++	printk(KERN_INFO "[BT]CLK OFF, %d\n", msm_uport->clk_state);
++	#endif
++	#else
++	if (use_low_power_wakeup(msm_uport)) {
++		msm_uport->wakeup.ignore = 1;
++		enable_irq(msm_uport->wakeup.irq);
++	}
++	#endif
++	wake_unlock(&msm_uport->dma_wake_lock);
++	return 1;
++}
++
++static enum hrtimer_restart msm_hs_clk_off_retry(struct hrtimer *timer)
++{
++	unsigned long flags;
++	int ret = HRTIMER_NORESTART;
++	struct msm_hs_port *msm_uport = container_of(timer, struct msm_hs_port,
++						     clk_off_timer);
++	struct uart_port *uport = &msm_uport->uport;
++
++	spin_lock_irqsave(&uport->lock, flags);
++
++	if (!msm_hs_check_clock_off_locked(uport)) {
++		hrtimer_forward_now(timer, msm_uport->clk_off_delay);
++		ret = HRTIMER_RESTART;
++	}
++
++	spin_unlock_irqrestore(&uport->lock, flags);
++
++	return ret;
++}
++
++static irqreturn_t msm_hs_isr(int irq, void *dev)
++{
++	unsigned long flags;
++	unsigned long isr_status;
++	struct msm_hs_port *msm_uport = (struct msm_hs_port *)dev;
++	struct uart_port *uport = &msm_uport->uport;
++	struct circ_buf *tx_buf = &uport->state->xmit;
++	struct msm_hs_tx *tx = &msm_uport->tx;
++	struct msm_hs_rx *rx = &msm_uport->rx;
++
++	spin_lock_irqsave(&uport->lock, flags);
++
++	isr_status = msm_hs_read(uport, UARTDM_MISR_ADDR);
++
++	/* Uart RX starting */
++	if (isr_status & UARTDM_ISR_RXLEV_BMSK) {
++		wake_lock(&rx->wake_lock);  /* hold wakelock while rx dma */
++		msm_uport->imr_reg &= ~UARTDM_ISR_RXLEV_BMSK;
++		msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++		/* Complete device write for IMR. Hence mb() requires. */
++		mb();
++	}
++	/* Stale rx interrupt */
++	if (isr_status & UARTDM_ISR_RXSTALE_BMSK) {
++		msm_hs_write(uport, UARTDM_CR_ADDR, STALE_EVENT_DISABLE);
++		msm_hs_write(uport, UARTDM_CR_ADDR, RESET_STALE_INT);
++		/*
++		 * Complete device write before calling DMOV API. Hence
++		 * mb() requires here.
++		 */
++		mb();
++
++		if (msm_uport->clk_req_off_state == CLK_REQ_OFF_RXSTALE_ISSUED)
++			msm_uport->clk_req_off_state =
++				CLK_REQ_OFF_FLUSH_ISSUED;
++
++		if (rx->flush == FLUSH_NONE) {
++			rx->flush = FLUSH_DATA_READY;
++			msm_dmov_flush(msm_uport->dma_rx_channel);
++		}
++	}
++	/* tx ready interrupt */
++	if (isr_status & UARTDM_ISR_TX_READY_BMSK) {
++		/* Clear  TX Ready */
++		msm_hs_write(uport, UARTDM_CR_ADDR, CLEAR_TX_READY);
++
++		if (msm_uport->clk_state == MSM_HS_CLK_REQUEST_OFF) {
++			msm_uport->imr_reg |= UARTDM_ISR_TXLEV_BMSK;
++			msm_hs_write(uport, UARTDM_IMR_ADDR,
++				     msm_uport->imr_reg);
++		}
++		/*
++		 * Complete both writes before starting new TX.
++		 * Hence mb() requires here.
++		 */
++		mb();
++		/* Complete DMA TX transactions and submit new transactions */
++		tx_buf->tail = (tx_buf->tail + tx->tx_count) & ~UART_XMIT_SIZE;
++
++		tx->dma_in_flight = 0;
++
++		uport->icount.tx += tx->tx_count;
++		if (tx->tx_ready_int_en)
++			msm_hs_submit_tx_locked(uport);
++
++		if (uart_circ_chars_pending(tx_buf) < WAKEUP_CHARS)
++			uart_write_wakeup(uport);
++	}
++	if (isr_status & UARTDM_ISR_TXLEV_BMSK) {
++		/* TX FIFO is empty */
++		msm_uport->imr_reg &= ~UARTDM_ISR_TXLEV_BMSK;
++		msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++		/*
++		 * Complete device write before starting clock_off request.
++		 * Hence mb() requires here.
++		 */
++		mb();
++		if (!msm_hs_check_clock_off_locked(uport))
++			hrtimer_start(&msm_uport->clk_off_timer,
++				      msm_uport->clk_off_delay,
++				      HRTIMER_MODE_REL);
++	}
++
++	/* Change in CTS interrupt */
++	if (isr_status & UARTDM_ISR_DELTA_CTS_BMSK)
++		msm_hs_handle_delta_cts_locked(uport);
++
++	spin_unlock_irqrestore(&uport->lock, flags);
++
++	return IRQ_HANDLED;
++}
++
++void brcm_msm_hs_request_clock_off_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	printk(KERN_ERR "[BT] %s\n", __func__);
++	if (msm_uport->clk_state == MSM_HS_CLK_ON) {
++		msm_uport->clk_state = MSM_HS_CLK_REQUEST_OFF;
++		msm_uport->clk_req_off_state = CLK_REQ_OFF_START;
++		msm_uport->imr_reg |= UARTDM_ISR_TXLEV_BMSK;
++		msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++		/*
++		 * Complete device write before retuning back.
++		 * Hence mb() requires here.
++		 */
++		mb();
++	}
++}
++/* request to turn off uart clock once pending TX is flushed */
++void brcm_msm_hs_request_clock_off(struct uart_port *uport)
++{
++	unsigned long flags;
++
++	spin_lock_irqsave(&uport->lock, flags);
++	brcm_msm_hs_request_clock_off_locked(uport);
++	spin_unlock_irqrestore(&uport->lock, flags);
++}
++
++void brcm_msm_hs_request_clock_on_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	unsigned int data;
++	int ret = 0;
++
++	printk(KERN_ERR "[BT] %s\n", __func__);
++	switch (msm_uport->clk_state) {
++	case MSM_HS_CLK_OFF:
++		wake_lock(&msm_uport->dma_wake_lock);
++		clk_enable(msm_uport->clk);
++		if (msm_uport->pclk)
++			ret = clk_enable(msm_uport->pclk);
++		#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++		#else
++		disable_irq_nosync(msm_uport->wakeup.irq);
++		/* fall-through */
++		#endif
++		if (unlikely(ret)) {
++			dev_err(uport->dev, "[BT]Clock ON Failure"
++				"Stalling HSUART\n");
++			break;
++		}
++		/* else fall-through */
++	case MSM_HS_CLK_REQUEST_OFF:
++		msm_uport->request_clk_off_delay = 100;
++		if (msm_uport->rx.flush == FLUSH_STOP ||
++		    msm_uport->rx.flush == FLUSH_SHUTDOWN) {
++			msm_hs_write(uport, UARTDM_CR_ADDR, RESET_RX);
++			data = msm_hs_read(uport, UARTDM_DMEN_ADDR);
++			data |= UARTDM_RX_DM_EN_BMSK;
++			msm_hs_write(uport, UARTDM_DMEN_ADDR, data);
++			/* Complete above device write. Hence mb() here. */
++			mb();
++		}
++		hrtimer_try_to_cancel(&msm_uport->clk_off_timer);
++		if (msm_uport->rx.flush == FLUSH_SHUTDOWN)
++			msm_hs_start_rx_locked(uport);
++		if (msm_uport->rx.flush == FLUSH_STOP)
++			msm_uport->rx.flush = FLUSH_IGNORE;
++		msm_uport->clk_state = MSM_HS_CLK_ON;
++
++	#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++	case MSM_HS_CLK_ON:
++	case MSM_HS_CLK_PORT_OFF:
++		{
++			unsigned int data;
++
++			/* If disabled, enable auto ready-for-receiving again */
++			data = msm_hs_read(uport, UARTDM_MR1_ADDR);
++			if (!(data & UARTDM_MR1_RX_RDY_CTL_BMSK)) {
++				data |= UARTDM_MR1_RX_RDY_CTL_BMSK;
++				msm_hs_write(uport, UARTDM_MR1_ADDR, data);
++				/* Complete above device write.
++				Hence mb() here. */
++				mb();
++				#ifdef BT_SERIAL_DBG
++				printk(KERN_INFO "[BT]- EN RFR -\n");
++				#endif
++			}
++		}
++		break;
++	#else
++		break;
++	case MSM_HS_CLK_ON: break;
++	case MSM_HS_CLK_PORT_OFF: break;
++	#endif
++	}
++}
++
++void brcm_msm_hs_request_clock_on(struct uart_port *uport)
++{
++	unsigned long flags;
++	spin_lock_irqsave(&uport->lock, flags);
++	brcm_msm_hs_request_clock_on_locked(uport);
++	spin_unlock_irqrestore(&uport->lock, flags);
++}
++
++static int
++msm_uartdm_ioctl(struct uart_port *uport, unsigned int cmd, unsigned long arg)
++{
++#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++	void __user *argp = (void __user *)arg;
++	unsigned long tbt_wakeup_level;
++	int i = 0;
++
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	struct msm_hs_tx *tx = &msm_uport->tx;
++	unsigned long tflags;
++
++	switch (cmd) {
++	case 0x8003:
++		/* aquire tx wakelock */
++		wake_lock(&tx->brcm_tx_wake_lock);
++
++#if 1/* should we add a if(), only block when RFR is disable? */
++		/* block at most 300 ms if CLK=MSM_HS_CLK_REQUEST_OFF */
++		for (i=0; i<15; i++) {
++			if(msm_uport->clk_state == MSM_HS_CLK_REQUEST_OFF) {
++				msleep(20);
++				printk(KERN_INFO "[BT]Wait CLK off, round:%d, CLK:%d\n",
++					i, msm_uport->clk_state);
++			} else {
++				break;
++			}
++		}
++#endif
++		spin_lock_irqsave(&uport->lock, tflags);
++		#ifdef BT_SERIAL_DBG
++		printk(KERN_INFO "[BT]-- HOST BT_WAKE=LOW, %d --\n",
++				msm_uport->clk_state);
++		#endif
++
++		if (msm_uport->bt_wakeup_pin_supported) {
++			//gpio_set_value(msm_uport->bt_wakeup_pin,
++			//		T_LOW);
++			msm_uport->bt_wakeup_level = 0;
++			msm_uport->host_want_sleep = 0;
++		}
++		spin_unlock_irqrestore(&uport->lock, tflags);
++
++		brcm_msm_hs_request_clock_on(uport);
++
++		break;
++
++	case 0x8004:
++		#ifdef BT_SERIAL_DBG
++		printk(KERN_INFO "[BT]-- HOST BT_WAKE=HIGH, %d --\n",
++				msm_uport->clk_state);
++		#endif
++
++		msm_uport->host_want_sleep = 1;
++		if (msm_uport->host_wakeup_level == 1)
++			brcm_msm_hs_request_clock_off(uport);
++		#ifdef BT_SERIAL_DBG
++		else
++			printk(KERN_INFO "[BT]BUT HOST_WAKE==LOW\n");
++		#endif
++
++		/* release tx wakelock */
++		wake_lock_timeout(&msm_uport->tx.brcm_tx_wake_lock, HZ / 2);
++
++		break;
++
++	case 0x8005:
++		/* the logic for rfkill1 is as follow:
++		 * rfkill1 return 1,BT_WAKE = LOW,it means awake state
++		 * rfkill1 return 0,BT_WAKE = HIGH,it means asleep state
++		 * So in ioctl did the same way as rfkill1
++		 */
++		tbt_wakeup_level = !msm_uport->bt_wakeup_level;
++		if (copy_to_user(argp, &tbt_wakeup_level,
++				sizeof(tbt_wakeup_level)))
++			return -EFAULT;
++		break;
++
++	default:
++		return -ENOIOCTLCMD;
++	}
++
++	return 0;
++#endif
++}
++
++static irqreturn_t msm_hs_wakeup_isr(int irq, void *dev)
++{
++#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++	unsigned long flags;
++	struct msm_hs_port *msm_uport = (struct msm_hs_port *)dev;
++	struct uart_port *uport = &msm_uport->uport;
++
++	spin_lock_irqsave(&uport->lock, flags);
++
++	if (msm_uport->host_wakeup_level == 0) { /* host_wake is high */
++		#ifdef BT_SERIAL_DBG
++		printk(KERN_INFO "[BT]-- CHIP HOST_WAKE=HIGH, %d --\n",
++				msm_uport->clk_state);
++		#endif
++		msm_uport->host_wakeup_level = 1;
++		irq_set_irq_type(msm_uport->wakeup.irq, IRQF_TRIGGER_LOW);
++		if ((msm_uport->host_want_sleep)
++				&& (msm_uport->clk_state == MSM_HS_CLK_ON)) {
++			#if 1	/* testing purpose, but do "not" remove it */
++			if (msm_uport->bt_wakeup_level)
++				msm_uport->request_clk_off_delay = 100;
++
++			msm_uport->clk_state = MSM_HS_CLK_REQUEST_OFF;
++			msm_uport->clk_req_off_state = CLK_REQ_OFF_START;
++			/* should change to rx?? */
++			msm_uport->imr_reg |= UARTDM_ISR_TXLEV_BMSK;
++			msm_hs_write(uport,
++					UARTDM_IMR_ADDR, msm_uport->imr_reg);
++			/* Complete above device write. Hence mb() here. */
++			mb();
++			#endif
++		}
++
++	} else {	/* host_wake is low */
++		#ifdef BT_SERIAL_DBG
++		printk(KERN_INFO "[BT]-- CHIP HOST_WAKE=LOW, %d --\n",
++				msm_uport->clk_state);
++		#endif
++
++		/* aquire rx wake lock */
++		if (msm_uport->rx.is_brcm_rx_wake_locked == 0) {
++			msm_uport->rx.is_brcm_rx_wake_locked = 1;
++			wake_lock(&msm_uport->rx.brcm_rx_wake_lock);
++		}
++
++		#if 1	/* host asserts bt_wake */
++		if ((msm_uport->bt_wakeup_level == 1)
++			&& (msm_uport->bt_wakeup_assert_inadvance == 0)) {
++			//gpio_set_value(msm_uport->bt_wakeup_pin,
++			//		T_LOW);
++			msm_uport->bt_wakeup_assert_inadvance = 1;
++			#ifdef BT_SERIAL_DBG
++			printk(KERN_INFO "[BT]SET BT_WAKE=LOW IN ADV\n");
++			#endif
++		}
++		#endif
++
++		msm_uport->host_wakeup_level = 0;
++		irq_set_irq_type(msm_uport->wakeup.irq, IRQF_TRIGGER_HIGH);
++		brcm_msm_hs_request_clock_on_locked(uport);
++/*
++		* btld will set BT_CHIP_WAKEUP HIGH later in this case,
++		 * so it is ok here.
++		 * *
++		msm_uport->host_want_sleep = 0;
++*/
++	}
++
++	spin_unlock_irqrestore(&uport->lock, flags);
++
++	return IRQ_HANDLED;
++#else
++	unsigned int wakeup = 0;
++	unsigned long flags;
++	struct msm_hs_port *msm_uport = (struct msm_hs_port *)dev;
++	struct uart_port *uport = &msm_uport->uport;
++	struct tty_struct *tty = NULL;
++
++	spin_lock_irqsave(&uport->lock, flags);
++	if (msm_uport->clk_state == MSM_HS_CLK_OFF) {
++		/* ignore the first irq - it is a pending irq that occured
++		 * before enable_irq() */
++		if (msm_uport->wakeup.ignore)
++			msm_uport->wakeup.ignore = 0;
++		else
++			wakeup = 1;
++	}
++
++	if (wakeup) {
++		/* the uart was clocked off during an rx, wake up and
++		 * optionally inject char into tty rx */
++		brcm_msm_hs_request_clock_on_locked(uport);
++		if (msm_uport->wakeup.inject_rx) {
++			tty = uport->state->port.tty;
++			tty_insert_flip_char(tty,
++					     msm_uport->wakeup.rx_to_inject,
++					     TTY_NORMAL);
++			queue_work(msm_hs_workqueue, &msm_uport->rx.tty_work);
++		}
++	}
++
++	spin_unlock_irqrestore(&uport->lock, flags);
++
++	return IRQ_HANDLED;
++#endif
++}
++
++static const char *msm_hs_type(struct uart_port *port)
++{
++	return ("MSM HS UART");
++}
++
++/* Called when port is opened */
++static int msm_hs_startup(struct uart_port *uport)
++{
++	int ret;
++	int rfr_level;
++	unsigned long flags;
++	unsigned int data;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	struct circ_buf *tx_buf = &uport->state->xmit;
++	struct msm_hs_tx *tx = &msm_uport->tx;
++
++	printk(KERN_INFO "[BT]== S UP ==\n");
++
++	rfr_level = uport->fifosize;
++	if (rfr_level > 16)
++		rfr_level -= 16;
++
++	tx->dma_base = dma_map_single(uport->dev, tx_buf->buf, UART_XMIT_SIZE,
++				      DMA_TO_DEVICE);
++
++	/* do not let tty layer execute RX in global workqueue, use a
++	 * dedicated workqueue managed by this driver */
++	uport->state->port.tty->low_latency = 1;
++
++	/* turn on uart clk */
++	ret = msm_hs_init_clk(uport);
++	if (unlikely(ret))
++		return ret;
++
++	/* Set auto RFR Level */
++	data = msm_hs_read(uport, UARTDM_MR1_ADDR);
++	data &= ~UARTDM_MR1_AUTO_RFR_LEVEL1_BMSK;
++	data &= ~UARTDM_MR1_AUTO_RFR_LEVEL0_BMSK;
++	data |= (UARTDM_MR1_AUTO_RFR_LEVEL1_BMSK & (rfr_level << 2));
++	data |= (UARTDM_MR1_AUTO_RFR_LEVEL0_BMSK & rfr_level);
++	msm_hs_write(uport, UARTDM_MR1_ADDR, data);
++
++	/* Make sure RXSTALE count is non-zero */
++	data = msm_hs_read(uport, UARTDM_IPR_ADDR);
++	if (!data) {
++		data |= 0x1f & UARTDM_IPR_STALE_LSB_BMSK;
++		msm_hs_write(uport, UARTDM_IPR_ADDR, data);
++	}
++
++	/* Enable Data Mover Mode */
++	data = UARTDM_TX_DM_EN_BMSK | UARTDM_RX_DM_EN_BMSK;
++	msm_hs_write(uport, UARTDM_DMEN_ADDR, data);
++
++	/* Reset TX */
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_TX);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_RX);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_ERROR_STATUS);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_BREAK_INT);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_STALE_INT);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RESET_CTS);
++	msm_hs_write(uport, UARTDM_CR_ADDR, RFR_LOW);
++	/* Turn on Uart Receiver */
++	msm_hs_write(uport, UARTDM_CR_ADDR, UARTDM_CR_RX_EN_BMSK);
++
++	/* Turn on Uart Transmitter */
++	msm_hs_write(uport, UARTDM_CR_ADDR, UARTDM_CR_TX_EN_BMSK);
++
++	/* Initialize the tx */
++	tx->tx_ready_int_en = 0;
++	tx->dma_in_flight = 0;
++
++	tx->xfer.complete_func = msm_hs_dmov_tx_callback;
++	tx->xfer.exec_func = NULL;
++
++	tx->command_ptr->cmd = CMD_LC |
++	    CMD_DST_CRCI(msm_uport->dma_tx_crci) | CMD_MODE_BOX;
++
++	tx->command_ptr->src_dst_len = (MSM_UARTDM_BURST_SIZE << 16)
++					   | (MSM_UARTDM_BURST_SIZE);
++
++	tx->command_ptr->row_offset = (MSM_UARTDM_BURST_SIZE << 16);
++
++	tx->command_ptr->dst_row_addr =
++	    msm_uport->uport.mapbase + UARTDM_TF_ADDR;
++
++	msm_uport->imr_reg |= UARTDM_ISR_RXSTALE_BMSK;
++	/* Enable reading the current CTS, no harm even if CTS is ignored */
++	msm_uport->imr_reg |= UARTDM_ISR_CURRENT_CTS_BMSK;
++
++	msm_hs_write(uport, UARTDM_TFWR_ADDR, 0);  /* TXLEV on empty TX fifo */
++	/*
++	 * Complete all device write related configuration before
++	 * queuing RX request. Hence mb() requires here.
++	 */
++	mb();
++
++	if (use_low_power_wakeup(msm_uport)) {
++		ret = irq_set_irq_wake(msm_uport->wakeup.irq, 1);
++		if (unlikely(ret))
++			return ret;
++	}
++
++	ret = request_irq(uport->irq, msm_hs_isr, IRQF_TRIGGER_HIGH,
++			  "msm_hs_uart", msm_uport);
++	if (unlikely(ret))
++		return ret;
++
++	msm_uport->host_wakeup_level = 1;
++	msm_uport->rx.is_brcm_rx_wake_locked = 0;
++
++	if (use_low_power_wakeup(msm_uport)) {
++
++		/* move from startup  **/
++/*		if (unlikely(set_irq_wake(msm_uport->rx_wakeup.irq, 1)))
++			return -ENXIO;
++*/
++
++		#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++		/* FIXME, should clear irq status first?? */
++		#endif
++
++		ret = request_irq(msm_uport->wakeup.irq,
++				msm_hs_wakeup_isr,
++				#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++				/* IRQF_TRIGGER_FALLING|IRQF_TRIGGER_RISING, */
++				IRQF_TRIGGER_LOW,
++				#else
++				IRQF_TRIGGER_FALLING,
++				#endif
++				"msm_hs_wakeup", msm_uport);
++		if (unlikely(ret))
++			return ret;
++
++		#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++		#else
++		disable_irq(msm_uport->wakeup.irq);
++		#endif
++	}
++
++	spin_lock_irqsave(&uport->lock, flags);
++
++	/* Still need this, right? */
++	msm_hs_write(uport, UARTDM_RFWR_ADDR, 0);
++	/* Complete above device write. Hence mb() here. */
++	mb();
++
++	msm_hs_start_rx_locked(uport);
++
++	spin_unlock_irqrestore(&uport->lock, flags);
++/*
++	ret = pm_runtime_set_active(uport->dev);
++	if (ret)
++		dev_err(uport->dev, "[BT]set active error:%d\n", ret);
++	pm_runtime_enable(uport->dev);
++*/
++
++	return 0;
++}
++
++/* Initialize tx and rx data structures */
++static int uartdm_init_port(struct uart_port *uport)
++{
++	int ret = 0;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++	struct msm_hs_tx *tx = &msm_uport->tx;
++	struct msm_hs_rx *rx = &msm_uport->rx;
++
++	/* Allocate the command pointer. Needs to be 64 bit aligned */
++	tx->command_ptr = kmalloc(sizeof(dmov_box), GFP_KERNEL | __GFP_DMA);
++	if (!tx->command_ptr)
++		return -ENOMEM;
++
++	tx->command_ptr_ptr = kmalloc(sizeof(u32 *), GFP_KERNEL | __GFP_DMA);
++	if (!tx->command_ptr_ptr) {
++		ret = -ENOMEM;
++		goto free_tx_command_ptr;
++	}
++
++	tx->mapped_cmd_ptr = dma_map_single(uport->dev, tx->command_ptr,
++					    sizeof(dmov_box), DMA_TO_DEVICE);
++	tx->mapped_cmd_ptr_ptr = dma_map_single(uport->dev,
++						tx->command_ptr_ptr,
++						sizeof(u32), DMA_TO_DEVICE);
++	tx->xfer.cmdptr = DMOV_CMD_ADDR(tx->mapped_cmd_ptr_ptr);
++
++	wake_lock_init(&tx->brcm_tx_wake_lock,
++			WAKE_LOCK_SUSPEND, "msm_serial_hs_brcm_tx");
++
++	wake_lock_init(&rx->brcm_rx_wake_lock,
++			WAKE_LOCK_SUSPEND, "msm_serial_hs_brcm_rx");
++
++	init_waitqueue_head(&rx->wait);
++	wake_lock_init(&rx->wake_lock, WAKE_LOCK_SUSPEND, "msm_serial_hs_rx");
++	wake_lock_init(&msm_uport->dma_wake_lock, WAKE_LOCK_SUSPEND,
++			"msm_serial_hs_dma");
++
++	tasklet_init(&rx->tlet, msm_serial_hs_rx_tlet,
++			(unsigned long) &rx->tlet);
++	tasklet_init(&tx->tlet, msm_serial_hs_tx_tlet,
++			(unsigned long) &tx->tlet);
++
++	rx->pool = dma_pool_create("rx_buffer_pool", uport->dev,
++				   UARTDM_RX_BUF_SIZE, 16, 0);
++
++	if (!rx->pool) {
++		pr_err("%s(): cannot allocate rx_buffer_pool", __func__);
++		ret = -ENOMEM;
++		goto exit_tasket_init;
++	}
++
++	rx->buffer = dma_pool_alloc(rx->pool, GFP_KERNEL, &rx->rbuffer);
++	if (!rx->buffer) {
++		pr_err("%s(): cannot allocate rx->buffer", __func__);
++		ret = -ENOMEM;
++		goto free_pool;
++	}
++
++	/* Allocate the command pointer. Needs to be 64 bit aligned */
++	rx->command_ptr = kmalloc(sizeof(dmov_box), GFP_KERNEL | __GFP_DMA);
++	if (!rx->command_ptr) {
++		pr_err("%s(): cannot allocate rx->command_ptr", __func__);
++		ret = -ENOMEM;
++		goto free_rx_buffer;
++	}
++
++	rx->command_ptr_ptr = kmalloc(sizeof(u32), GFP_KERNEL | __GFP_DMA);
++	if (!rx->command_ptr_ptr) {
++		pr_err("%s(): cannot allocate rx->command_ptr_ptr", __func__);
++		ret = -ENOMEM;
++		goto free_rx_command_ptr;
++	}
++
++	rx->command_ptr->num_rows = ((UARTDM_RX_BUF_SIZE >> 4) << 16) |
++					 (UARTDM_RX_BUF_SIZE >> 4);
++
++	rx->command_ptr->dst_row_addr = rx->rbuffer;
++
++	/* Set up Uart Receive */
++	msm_hs_write(uport, UARTDM_RFWR_ADDR, 0);
++
++	rx->xfer.complete_func = msm_hs_dmov_rx_callback;
++
++	rx->command_ptr->cmd = CMD_LC |
++	    CMD_SRC_CRCI(msm_uport->dma_rx_crci) | CMD_MODE_BOX;
++
++	rx->command_ptr->src_dst_len = (MSM_UARTDM_BURST_SIZE << 16)
++					   | (MSM_UARTDM_BURST_SIZE);
++	rx->command_ptr->row_offset =  MSM_UARTDM_BURST_SIZE;
++	rx->command_ptr->src_row_addr = uport->mapbase + UARTDM_RF_ADDR;
++
++	rx->mapped_cmd_ptr = dma_map_single(uport->dev, rx->command_ptr,
++					    sizeof(dmov_box), DMA_TO_DEVICE);
++
++	*rx->command_ptr_ptr = CMD_PTR_LP | DMOV_CMD_ADDR(rx->mapped_cmd_ptr);
++
++	rx->cmdptr_dmaaddr = dma_map_single(uport->dev, rx->command_ptr_ptr,
++					    sizeof(u32), DMA_TO_DEVICE);
++	rx->xfer.cmdptr = DMOV_CMD_ADDR(rx->cmdptr_dmaaddr);
++
++	INIT_WORK(&rx->tty_work, msm_hs_tty_flip_buffer_work);
++	INIT_DELAYED_WORK(&rx->flip_insert_work, flip_insert_work);
++
++	rx->xfer.list.next = LIST_POISON1;
++	tx->xfer.list.next = LIST_POISON1;
++
++	return ret;
++
++free_rx_command_ptr:
++	kfree(rx->command_ptr);
++
++free_rx_buffer:
++	dma_pool_free(msm_uport->rx.pool, msm_uport->rx.buffer,
++			msm_uport->rx.rbuffer);
++
++free_pool:
++	dma_pool_destroy(msm_uport->rx.pool);
++
++exit_tasket_init:
++	wake_lock_destroy(&msm_uport->rx.wake_lock);
++	wake_lock_destroy(&msm_uport->dma_wake_lock);
++	tasklet_kill(&msm_uport->tx.tlet);
++	tasklet_kill(&msm_uport->rx.tlet);
++	dma_unmap_single(uport->dev, msm_uport->tx.mapped_cmd_ptr_ptr,
++			sizeof(u32 *), DMA_TO_DEVICE);
++	dma_unmap_single(uport->dev, msm_uport->tx.mapped_cmd_ptr,
++			sizeof(dmov_box), DMA_TO_DEVICE);
++	kfree(msm_uport->tx.command_ptr_ptr);
++
++free_tx_command_ptr:
++	kfree(msm_uport->tx.command_ptr);
++	return ret;
++}
++
++static int msm_hs_probe(struct platform_device *pdev)
++{
++	int ret;
++	struct uart_port *uport;
++	struct msm_hs_port *msm_uport;
++	struct resource *resource;
++	struct msm_serial_hs_platform_data *pdata = pdev->dev.platform_data;
++
++	/* for debug */
++	printk(KERN_INFO "[BT]BRCM chip - LPM\n");
++
++	if (pdev->id < 0 || pdev->id >= UARTDM_NR) {
++		printk(KERN_ERR "[BT]Invalid plaform device ID = %d\n",
++				pdev->id);
++		return -EINVAL;
++	}
++
++	msm_uport = &q_uart_port[pdev->id];
++	uport = &msm_uport->uport;
++
++	uport->dev = &pdev->dev;
++
++	resource = platform_get_resource(pdev, IORESOURCE_MEM, 0);
++	if (unlikely(!resource))
++		return -ENXIO;
++	uport->mapbase = resource->start;  /* virtual address */
++
++	uport->membase = ioremap(uport->mapbase, PAGE_SIZE);
++	if (unlikely(!uport->membase))
++		return -ENOMEM;
++
++	uport->irq = platform_get_irq(pdev, 0);
++	/*
++	if (unlikely((int)uport->irq < 0))
++		return -ENXIO;
++	*/
++
++	if (pdata == NULL || pdata->rx_wakeup_irq < 0)
++		msm_uport->wakeup.irq = -1;
++	else {
++		msm_uport->wakeup.irq = pdata->rx_wakeup_irq;
++		msm_uport->wakeup.ignore = 1;
++		msm_uport->wakeup.inject_rx = pdata->inject_rx_on_wakeup;
++		msm_uport->wakeup.rx_to_inject = pdata->rx_to_inject;
++
++		if (unlikely(msm_uport->wakeup.irq < 0))
++			return -ENXIO;
++	}
++
++	if (pdata == NULL)
++		msm_uport->exit_lpm_cb = NULL;
++	else {
++		msm_uport->exit_lpm_cb = pdata->exit_lpm_cb;
++
++		#ifdef USE_BCM_BT_CHIP	/* bt for brcm */
++		if (pdata->bt_wakeup_pin_supported) {
++			msm_uport->bt_wakeup_pin_supported
++				= pdata->bt_wakeup_pin_supported;
++			msm_uport->bt_wakeup_pin = pdata->bt_wakeup_pin;
++			msm_uport->bt_wakeup_level = 1;
++			msm_uport->bt_wakeup_assert_inadvance = 0;
++			msm_uport->host_wakeup_pin = pdata->host_wakeup_pin;
++			msm_uport->host_want_sleep = 1;
++			msm_uport->request_clk_off_delay = 0;
++			msm_uport->host_wakeup_level = 1;
++		}
++		#endif
++	}
++	resource = platform_get_resource_byname(pdev, IORESOURCE_DMA,
++						"uartdm_channels");
++	if (unlikely(!resource))
++		return -ENXIO;
++	msm_uport->dma_tx_channel = resource->start;
++	msm_uport->dma_rx_channel = resource->end;
++
++	resource = platform_get_resource_byname(pdev, IORESOURCE_DMA,
++						"uartdm_crci");
++	if (unlikely(!resource))
++		return -ENXIO;
++	msm_uport->dma_tx_crci = resource->start;
++	msm_uport->dma_rx_crci = resource->end;
++
++	uport->iotype = UPIO_MEM;
++	uport->fifosize = 64;
++	uport->ops = &msm_hs_ops;
++	uport->flags = UPF_BOOT_AUTOCONF;
++	uport->uartclk = 7372800;
++	msm_uport->imr_reg = 0x0;
++
++	msm_uport->clk = clk_get(&pdev->dev, "core_clk");
++	if (IS_ERR(msm_uport->clk))
++		return PTR_ERR(msm_uport->clk);
++
++	msm_uport->pclk = clk_get(&pdev->dev, "iface_clk");
++	/*
++	 * Some configurations do not require explicit pclk control so
++	 * do not flag error on pclk get failure.
++	 */
++	if (IS_ERR(msm_uport->pclk))
++		msm_uport->pclk = NULL;
++
++	ret = clk_set_rate(msm_uport->clk, uport->uartclk);
++	if (ret) {
++		printk(KERN_WARNING "[BT]Error setting clock rate on UART\n");
++		return ret;
++	}
++
++	ret = uartdm_init_port(uport);
++	if (unlikely(ret))
++		return ret;
++
++	/* configure the CR Protection to Enable */
++	msm_hs_write(uport, UARTDM_CR_ADDR, CR_PROTECTION_EN);
++	/*
++	 * Enable Command register protection before going ahead as this hw
++	 * configuration makes sure that issued cmd to CR register gets complete
++	 * before next issued cmd start. Hence mb() requires here.
++	 */
++	mb();
++
++	msm_uport->clk_state = MSM_HS_CLK_PORT_OFF;
++	hrtimer_init(&msm_uport->clk_off_timer, CLOCK_MONOTONIC,
++		     HRTIMER_MODE_REL);
++	msm_uport->clk_off_timer.function = msm_hs_clk_off_retry;
++	msm_uport->clk_off_delay = ktime_set(0, 1000000);  /* 1ms */
++
++	ret = sysfs_create_file(&pdev->dev.kobj, &dev_attr_clock.attr);
++	if (unlikely(ret))
++		return ret;
++
++	uport->line = pdev->id;
++	return uart_add_one_port(&msm_hs_driver, uport);
++}
++
++static int __init msm_serial_hs_init(void)
++{
++	int ret;
++	int i;
++
++	/* Init all UARTS as non-configured */
++	for (i = 0; i < UARTDM_NR; i++)
++		q_uart_port[i].uport.type = PORT_UNKNOWN;
++
++	msm_hs_workqueue = create_singlethread_workqueue("msm_hs_brcm_wq");
++
++	ret = uart_register_driver(&msm_hs_driver);
++	if (unlikely(ret)) {
++		printk(KERN_ERR "[BT]%s failed to load\n", __func__);
++		return ret;
++	}
++	ret = platform_driver_register(&msm_serial_hs_platform_driver);
++	if (ret) {
++		printk(KERN_ERR "[BT]%s failed to load\n", __func__);
++		uart_unregister_driver(&msm_hs_driver);
++		return ret;
++	}
++
++	printk(KERN_INFO "[BT]msm_serial_hs_brcm_lpm module loaded\n");
++	return ret;
++}
++
++/*
++ *  Called by the upper layer when port is closed.
++ *     - Disables the port
++ *     - Unhook the ISR
++ */
++static void msm_hs_shutdown(struct uart_port *uport)
++{
++	unsigned long flags;
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	BUG_ON(msm_uport->rx.flush < FLUSH_STOP);
++	tasklet_kill(&msm_uport->tx.tlet);
++	wait_event(msm_uport->rx.wait, msm_uport->rx.flush == FLUSH_SHUTDOWN);
++	tasklet_kill(&msm_uport->rx.tlet);
++	cancel_delayed_work_sync(&msm_uport->rx.flip_insert_work);
++
++	spin_lock_irqsave(&uport->lock, flags);
++	clk_enable(msm_uport->clk);
++
++	/* Disable the transmitter */
++	msm_hs_write(uport, UARTDM_CR_ADDR, UARTDM_CR_TX_DISABLE_BMSK);
++	/* Disable the receiver */
++	msm_hs_write(uport, UARTDM_CR_ADDR, UARTDM_CR_RX_DISABLE_BMSK);
++
++	/* disable irq wakeup when shutdown **/
++	if (use_low_power_wakeup(msm_uport))
++		irq_set_irq_wake(msm_uport->wakeup.irq, 0);
++
++
++	/* Remove it here to make sure wakelock is released when shutdown */
++	wake_lock_timeout(&msm_uport->tx.brcm_tx_wake_lock, HZ / 2);
++	wake_lock_timeout(&msm_uport->rx.brcm_rx_wake_lock, HZ / 2);
++	/* make sure wake_lock is released */
++	wake_lock_timeout(&msm_uport->rx.wake_lock, HZ / 10);
++
++	/* Free the interrupt */
++	free_irq(uport->irq, msm_uport);
++	if (use_low_power_wakeup(msm_uport))
++		free_irq(msm_uport->wakeup.irq, msm_uport);
++
++	msm_uport->imr_reg = 0;
++	msm_hs_write(uport, UARTDM_IMR_ADDR, msm_uport->imr_reg);
++	/*
++	 * Complete all device write before actually disabling uartclk.
++	 * Hence mb() requires here.
++	 */
++	mb();
++
++	clk_disable(msm_uport->clk);  /* to balance local clk_enable() */
++	if (msm_uport->clk_state != MSM_HS_CLK_OFF) {
++		clk_disable(msm_uport->clk);  /* to balance clk_state */
++		if (msm_uport->pclk)
++			clk_disable(msm_uport->pclk);
++		wake_unlock(&msm_uport->dma_wake_lock);
++	}
++	msm_uport->clk_state = MSM_HS_CLK_PORT_OFF;
++
++	dma_unmap_single(uport->dev, msm_uport->tx.dma_base,
++			 UART_XMIT_SIZE, DMA_TO_DEVICE);
++
++	spin_unlock_irqrestore(&uport->lock, flags);
++
++	if (cancel_work_sync(&msm_uport->rx.tty_work))
++		msm_hs_tty_flip_buffer_work(&msm_uport->rx.tty_work);
++
++/*
++	pm_runtime_disable(uport->dev);
++	pm_runtime_set_suspended(uport->dev);
++*/
++	printk(KERN_INFO "[BT]== S DN ==\n");
++
++}
++
++static void __exit msm_serial_hs_exit(void)
++{
++	printk(KERN_INFO "[BT]msm_serial_hs_brcm_lpm module removed\n");
++	platform_driver_unregister(&msm_serial_hs_platform_driver);
++	uart_unregister_driver(&msm_hs_driver);
++	destroy_workqueue(msm_hs_workqueue);
++}
++
++static int msm_hs_runtime_idle(struct device *dev)
++{
++	/*
++	 * returning success from idle results in runtime suspend to be
++	 * called
++	 */
++	return 0;
++}
++
++static int msm_hs_runtime_resume(struct device *dev)
++{
++/*
++	struct platform_device *pdev = container_of(dev, struct
++						    platform_device, dev);
++	struct msm_hs_port *msm_uport = &q_uart_port[pdev->id];
++	msm_hs_request_clock_on(&msm_uport->uport);
++*/
++	return 0;
++}
++
++static int msm_hs_runtime_suspend(struct device *dev)
++{
++/*
++	struct platform_device *pdev = container_of(dev, struct
++						    platform_device, dev);
++	struct msm_hs_port *msm_uport = &q_uart_port[pdev->id];
++	msm_hs_request_clock_off(&msm_uport->uport);
++*/
++	return 0;
++}
++
++void msm_hs_request_clock_off_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	printk(KERN_ERR "[BT] %s host_wakeup_level=%d\n", __func__, msm_uport->host_wakeup_level);
++
++	if (msm_uport->host_wakeup_level == 0) { /* host_wake is high */
++		msm_uport->host_want_sleep = 1;
++		#ifdef BT_SERIAL_DBG
++		printk(KERN_INFO "[BT]-- CHIP HOST_WAKE=HIGH, %d --\n",
++				msm_uport->clk_state);
++		#endif
++		msm_uport->host_wakeup_level = 1;
++		irq_set_irq_type(msm_uport->wakeup.irq, IRQF_TRIGGER_LOW);
++		if ((msm_uport->host_want_sleep)
++				&& (msm_uport->clk_state == MSM_HS_CLK_ON)) {
++			#if 1	/* testing purpose, but do "not" remove it */
++			if (msm_uport->bt_wakeup_level)
++				msm_uport->request_clk_off_delay = 100;
++
++			msm_uport->clk_state = MSM_HS_CLK_REQUEST_OFF;
++			msm_uport->clk_req_off_state = CLK_REQ_OFF_START;
++			/* should change to rx?? */
++			msm_uport->imr_reg |= UARTDM_ISR_TXLEV_BMSK;
++			msm_hs_write(uport,
++					UARTDM_IMR_ADDR, msm_uport->imr_reg);
++			/* Complete above device write. Hence mb() here. */
++			mb();
++			#endif
++		}
++	}
++}
++
++void msm_hs_request_clock_on_locked(struct uart_port *uport)
++{
++	struct msm_hs_port *msm_uport = UARTDM_TO_MSM(uport);
++
++	printk(KERN_ERR "[BT] %s host_wakeup_level=%d\n", __func__, msm_uport->host_wakeup_level);
++
++	if (msm_uport->host_wakeup_level != 0) {	/* host_wake is low */
++		#ifdef BT_SERIAL_DBG
++		printk(KERN_INFO "[BT]-- CHIP HOST_WAKE=LOW, %d --\n",
++				msm_uport->clk_state);
++		#endif
++
++		/* aquire rx wake lock */
++		if (msm_uport->rx.is_brcm_rx_wake_locked == 0) {
++			msm_uport->rx.is_brcm_rx_wake_locked = 1;
++			wake_lock(&msm_uport->rx.brcm_rx_wake_lock);
++		}
++
++		#if 1	/* host asserts bt_wake */
++		if ((msm_uport->bt_wakeup_level == 1)
++			&& (msm_uport->bt_wakeup_assert_inadvance == 0)) {
++			//gpio_set_value(msm_uport->bt_wakeup_pin,
++			//		T_LOW);
++			msm_uport->bt_wakeup_assert_inadvance = 1;
++			#ifdef BT_SERIAL_DBG
++			printk(KERN_INFO "[BT]SET BT_WAKE=LOW IN ADV\n");
++			#endif
++		}
++		#endif
++
++		msm_uport->host_wakeup_level = 0;
++		//irq_set_irq_type(msm_uport->wakeup.irq, IRQF_TRIGGER_HIGH);
++		brcm_msm_hs_request_clock_on_locked(uport);
++
++		/* btld will set BT_CHIP_WAKEUP HIGH later in this case,
++		 * so it is ok here.
++		 * */
++		msm_uport->host_want_sleep = 0;
++	}
++}
++
++void msm_hs_request_clock_on(struct uart_port *uport);
++static const struct dev_pm_ops msm_hs_dev_pm_ops = {
++	.runtime_suspend = msm_hs_runtime_suspend,
++	.runtime_resume  = msm_hs_runtime_resume,
++	.runtime_idle    = msm_hs_runtime_idle,
++};
++
++static struct platform_driver msm_serial_hs_platform_driver = {
++	.probe = msm_hs_probe,
++	.remove = msm_hs_remove,
++	.driver = {
++		   .name = "msm_serial_hs_brcm_lpm",
++		.pm   = &msm_hs_dev_pm_ops,
++	},
++};
++
++static struct uart_driver msm_hs_driver = {
++	.owner = THIS_MODULE,
++	.driver_name = "msm_serial_hs_brcm_lpm",
++	.dev_name = "ttyHS",
++	.nr = UARTDM_NR,
++	.cons = 0,
++};
++
++static struct uart_ops msm_hs_ops = {
++	.tx_empty = brcm_msm_hs_tx_empty,
++	.set_mctrl = msm_hs_set_mctrl_locked,
++	.get_mctrl = msm_hs_get_mctrl_locked,
++	.stop_tx = msm_hs_stop_tx_locked,
++	.start_tx = msm_hs_start_tx_locked,
++	.stop_rx = msm_hs_stop_rx_locked,
++	.enable_ms = msm_hs_enable_ms_locked,
++	.break_ctl = msm_hs_break_ctl,
++	.startup = msm_hs_startup,
++	.shutdown = msm_hs_shutdown,
++	.set_termios = msm_hs_set_termios,
++	.type = msm_hs_type,
++	.config_port = msm_hs_config_port,
++	.ioctl = msm_uartdm_ioctl,
++	.release_port = msm_hs_release_port,
++	.request_port = msm_hs_request_port,
++};
++
++module_init(msm_serial_hs_init);
++module_exit(msm_serial_hs_exit);
++MODULE_DESCRIPTION("High Speed UART Driver for the MSM chipset");
++MODULE_VERSION("1.2");
++MODULE_LICENSE("GPL v2");
+Binary files android_kernel_htc_primoc/.git/index and android_kernel_htc_primoc.new/.git/index differ
+diff -u -r -N android_kernel_htc_primoc/.git/logs/HEAD android_kernel_htc_primoc.new/.git/logs/HEAD
+--- android_kernel_htc_primoc/.git/logs/HEAD	2012-10-30 01:04:20.635132809 +0100
++++ android_kernel_htc_primoc.new/.git/logs/HEAD	2012-10-30 00:52:24.206794435 +0100
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 f8114d1dc152dc8ad24e13dc9f96db59a26633ec Max Weninger <max.weninger@gmail.com> 1351555460 +0100	clone: from https://github.com/jmztaylor/android_kernel_htc_primoc
++0000000000000000000000000000000000000000 f8114d1dc152dc8ad24e13dc9f96db59a26633ec Max Weninger <max.weninger@gmail.com> 1351554744 +0100	clone: from https://github.com/jmztaylor/android_kernel_htc_primoc
+diff -u -r -N android_kernel_htc_primoc/.git/logs/refs/heads/jellybean android_kernel_htc_primoc.new/.git/logs/refs/heads/jellybean
+--- android_kernel_htc_primoc/.git/logs/refs/heads/jellybean	2012-10-30 01:04:20.634132808 +0100
++++ android_kernel_htc_primoc.new/.git/logs/refs/heads/jellybean	2012-10-30 00:52:24.205794435 +0100
+@@ -1 +1 @@
+-0000000000000000000000000000000000000000 f8114d1dc152dc8ad24e13dc9f96db59a26633ec Max Weninger <max.weninger@gmail.com> 1351555460 +0100	clone: from https://github.com/jmztaylor/android_kernel_htc_primoc
++0000000000000000000000000000000000000000 f8114d1dc152dc8ad24e13dc9f96db59a26633ec Max Weninger <max.weninger@gmail.com> 1351554744 +0100	clone: from https://github.com/jmztaylor/android_kernel_htc_primoc
+diff -u -r -N android_kernel_htc_primoc/include/net/bluetooth/amp.h android_kernel_htc_primoc.new/include/net/bluetooth/amp.h
+--- android_kernel_htc_primoc/include/net/bluetooth/amp.h	2012-10-30 01:04:38.709141050 +0100
++++ android_kernel_htc_primoc.new/include/net/bluetooth/amp.h	2012-10-30 01:04:50.372146360 +0100
+@@ -1,5 +1,5 @@
+ /*
+-   Copyright (c) 2010-2011 Code Aurora Forum.  All rights reserved.
++   Copyright (c) 2010-2012 Code Aurora Forum.  All rights reserved.
+ 
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License version 2 and
+@@ -115,7 +115,7 @@
+ void amp_exit(void);
+ 
+ /* L2CAP-AMP fixed channel interface */
+-void amp_conn_ind(struct l2cap_conn *conn, struct sk_buff *skb);
++void amp_conn_ind(struct hci_conn *hcon, struct sk_buff *skb);
+ 
+ /* L2CAP-AMP link interface */
+ void amp_create_physical(struct l2cap_conn *conn, struct sock *sk);
+@@ -256,7 +256,7 @@
+ };
+ struct amp_work_conn_ind {
+ 	struct work_struct work;
+-	struct l2cap_conn *conn;
++	struct hci_conn *hcon;
+ 	struct sk_buff *skb;
+ };
+ struct amp_work_create_physical {
+diff -u -r -N android_kernel_htc_primoc/include/net/bluetooth/bluetooth.h android_kernel_htc_primoc.new/include/net/bluetooth/bluetooth.h
+--- android_kernel_htc_primoc/include/net/bluetooth/bluetooth.h	2012-10-30 01:04:38.709141050 +0100
++++ android_kernel_htc_primoc.new/include/net/bluetooth/bluetooth.h	2012-10-30 01:04:50.373146360 +0100
+@@ -99,21 +99,32 @@
+  */
+ #define BT_AMP_POLICY_PREFER_AMP       2
+ 
++#define BT_LE_PARAMS	100
++
++#define BT_LE_SCAN_WINDOW_MIN		0x0004
++#define BT_LE_SCAN_WINDOW_MAX		0x4000
++#define BT_LE_SCAN_WINDOW_DEF		0x0004
++
++#define BT_LE_SCAN_INTERVAL_MIN		0x0004
++#define BT_LE_SCAN_INTERVAL_MAX		0x4000
++#define BT_LE_SCAN_INTERVAL_DEF		0x0008
++
++#define BT_LE_CONN_INTERVAL_MIN		0x0006
++#define BT_LE_CONN_INTERVAL_MAX		0x0C80
++#define BT_LE_CONN_INTERVAL_MIN_DEF	0x0008
++#define BT_LE_CONN_INTERVAL_MAX_DEF	0x0100
++
++#define BT_LE_LATENCY_MAX		0x01F4
++#define BT_LE_LATENCY_DEF		0x0000
++
++#define BT_LE_SUP_TO_MIN		0x000A
++#define BT_LE_SUP_TO_MAX		0x0C80
++#define BT_LE_SUP_TO_DEFAULT		0X03E8
++
+ #define BT_INFO(fmt, arg...) printk(KERN_INFO "Bluetooth: " fmt "\n" , ## arg)
+ #define BT_ERR(fmt, arg...)  printk(KERN_ERR "%s: " fmt "\n" , __func__ , ## arg)
+ #define BT_DBG(fmt, arg...)  pr_debug("%s: " fmt "\n" , __func__ , ## arg)
+ 
+-/* HTC_BT add begin */
+-#define PR_BT_EMERG(fmt, arg...)    printk(KERN_EMERG   "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-#define PR_BT_ALERT(fmt, arg...)    printk(KERN_ALERT   "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-#define PR_BT_CRIT(fmt, arg...)     printk(KERN_CRIT    "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-#define PR_BT_ERR(fmt, arg...)      printk(KERN_ERR     "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-#define PR_BT_WARNING(fmt, arg...)  printk(KERN_WARNING "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-#define PR_BT_NOTICE(fmt, arg...)   printk(KERN_NOTICE  "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-#define PR_BT_INFO(fmt, arg...)     printk(KERN_INFO    "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-#define PR_BT_DEBUG(fmt, arg...)    printk(KERN_DEBUG   "[BT] %s: " fmt "\n" , __func__ , ## arg)
+-/* HTC_BT add end */
+-
+ /* Connection and socket states */
+ enum {
+ 	BT_CONNECTED = 1, /* Equal to TCP_ESTABLISHED to make net code happy */
+@@ -153,6 +164,20 @@
+ 
+ #define bt_sk(__sk) ((struct bt_sock *) __sk)
+ 
++struct bt_le_params {
++	__u8  prohibit_remote_chg;
++	__u8  filter_policy;
++	__u16 scan_interval;
++	__u16 scan_window;
++	__u16 interval_min;
++	__u16 interval_max;
++	__u16 latency;
++	__u16 supervision_timeout;
++	__u16 min_ce_len;
++	__u16 max_ce_len;
++	__u16 conn_timeout;
++};
++
+ struct bt_sock {
+ 	struct sock sk;
+ 	bdaddr_t    src;
+@@ -160,6 +185,7 @@
+ 	struct list_head accept_q;
+ 	struct sock *parent;
+ 	u32 defer_setup;
++	struct bt_le_params le_params;
+ };
+ 
+ struct bt_sock_list {
+@@ -260,32 +286,10 @@
+ 
+ extern struct dentry *bt_debugfs;
+ 
+-#ifdef CONFIG_BT_L2CAP
+ int l2cap_init(void);
+ void l2cap_exit(void);
+-#else
+-static inline int l2cap_init(void)
+-{
+-	return 0;
+-}
+ 
+-static inline void l2cap_exit(void)
+-{
+-}
+-#endif
+-
+-#ifdef CONFIG_BT_SCO
+ int sco_init(void);
+ void sco_exit(void);
+-#else
+-static inline int sco_init(void)
+-{
+-	return 0;
+-}
+-
+-static inline void sco_exit(void)
+-{
+-}
+-#endif
+ 
+ #endif /* __BLUETOOTH_H */
+diff -u -r -N android_kernel_htc_primoc/include/net/bluetooth/hci_core.h android_kernel_htc_primoc.new/include/net/bluetooth/hci_core.h
+--- android_kernel_htc_primoc/include/net/bluetooth/hci_core.h	2012-10-30 01:04:38.709141050 +0100
++++ android_kernel_htc_primoc.new/include/net/bluetooth/hci_core.h	2012-10-30 01:04:50.384146364 +0100
+@@ -26,7 +26,7 @@
+ #define __HCI_CORE_H
+ 
+ #include <net/bluetooth/hci.h>
+-
++#include <linux/wakelock.h>
+ /* HCI upper protocols */
+ #define HCI_PROTO_L2CAP	0
+ #define HCI_PROTO_SCO	1
+@@ -304,23 +304,29 @@
+ 	__u8		auth_initiator;
+ 	__u8		power_save;
+ 	__u16		disc_timeout;
++	__u16		conn_timeout;
+ 	unsigned long	pend;
+ 
+ 	__u8		remote_cap;
+ 	__u8		remote_oob;
+ 	__u8		remote_auth;
+ 
++	__s8	rssi_threshold;
++	__u16	rssi_update_interval;
++	__u8	rssi_update_thresh_exceed;
++
+ 	unsigned int	sent;
+ 
+ 	struct sk_buff_head data_q;
+ 
+ 	struct timer_list disc_timer;
+ 	struct timer_list idle_timer;
++	struct delayed_work	rssi_update_work;
+ 	struct timer_list encrypt_pause_timer;
+ 
+ 	struct work_struct work_add;
+ 	struct work_struct work_del;
+-
++	struct wake_lock idle_lock;
+ 	struct device	dev;
+ 	atomic_t	devref;
+ 
+@@ -582,10 +588,7 @@
+ }
+ int hci_chan_put(struct hci_chan *chan);
+ 
+-struct hci_chan *hci_chan_accept(struct hci_conn *hcon,
+-				struct hci_ext_fs *tx_fs,
+-				struct hci_ext_fs *rx_fs);
+-struct hci_chan *hci_chan_create(struct hci_conn *hcon,
++struct hci_chan *hci_chan_create(struct hci_chan *chan,
+ 				struct hci_ext_fs *tx_fs,
+ 				struct hci_ext_fs *rx_fs);
+ void hci_chan_modify(struct hci_chan *chan,
+@@ -595,6 +598,10 @@
+ struct hci_conn *hci_connect(struct hci_dev *hdev, int type,
+ 					__u16 pkt_type, bdaddr_t *dst,
+ 					__u8 sec_level, __u8 auth_type);
++struct hci_conn *hci_le_connect(struct hci_dev *hdev, __u16 pkt_type,
++					bdaddr_t *dst, __u8 sec_level,
++					__u8 auth_type,
++					struct bt_le_params *le_params);
+ int hci_conn_check_link_mode(struct hci_conn *conn);
+ int hci_conn_security(struct hci_conn *conn, __u8 sec_level, __u8 auth_type);
+ int hci_conn_change_link_key(struct hci_conn *conn);
+@@ -608,6 +615,10 @@
+ void hci_conn_hold_device(struct hci_conn *conn);
+ void hci_conn_put_device(struct hci_conn *conn);
+ 
++void hci_conn_set_rssi_reporter(struct hci_conn *conn,
++		s8 rssi_threshold, u16 interval, u8 updateOnThreshExceed);
++void hci_conn_unset_rssi_reporter(struct hci_conn *conn);
++
+ static inline void hci_conn_hold(struct hci_conn *conn)
+ {
+ 	atomic_inc(&conn->refcnt);
+@@ -1040,6 +1051,8 @@
+ 								u8 status);
+ int mgmt_device_found(u16 index, bdaddr_t *bdaddr, u8 type, u8 le,
+ 				u8 *dev_class, s8 rssi, u8 eir_len, u8 *eir);
++void mgmt_read_rssi_complete(u16 index, s8 rssi, bdaddr_t *bdaddr,
++				u16 handle, u8 status);
+ int mgmt_remote_name(u16 index, bdaddr_t *bdaddr, u8 status, u8 *name);
+ void mgmt_inquiry_started(u16 index);
+ void mgmt_inquiry_complete_evt(u16 index, u8 status);
+@@ -1091,4 +1104,6 @@
+ void hci_le_ltk_reply(struct hci_conn *conn, u8 ltk[16]);
+ void hci_le_ltk_neg_reply(struct hci_conn *conn);
+ 
++void hci_read_rssi(struct hci_conn *conn);
++
+ #endif /* __HCI_CORE_H */
+diff -u -r -N android_kernel_htc_primoc/include/net/bluetooth/hci.h android_kernel_htc_primoc.new/include/net/bluetooth/hci.h
+--- android_kernel_htc_primoc/include/net/bluetooth/hci.h	2012-10-30 01:04:38.709141050 +0100
++++ android_kernel_htc_primoc.new/include/net/bluetooth/hci.h	2012-10-30 01:04:50.384146365 +0100
+@@ -86,7 +86,6 @@
+ 	HCI_SERVICE_CACHE,
+ 	HCI_LINK_KEYS,
+ 	HCI_DEBUG_KEYS,
+-	HCI_UNREGISTER,
+ 
+ 	HCI_RESET,
+ };
+@@ -870,6 +869,17 @@
+ 	__le16   num_blocks;
+ } __packed;
+ 
++#define HCI_OP_READ_RSSI	0x1405
++struct hci_cp_read_rssi {
++	__le16   handle;
++} __packed;
++
++struct hci_rp_read_rssi {
++	__u8     status;
++	__le16   handle;
++	__s8     rssi;
++} __packed;
++
+ #define HCI_OP_READ_LOCAL_AMP_INFO	0x1409
+ struct hci_rp_read_local_amp_info {
+ 	__u8     status;
+diff -u -r -N android_kernel_htc_primoc/include/net/bluetooth/l2cap.h android_kernel_htc_primoc.new/include/net/bluetooth/l2cap.h
+--- android_kernel_htc_primoc/include/net/bluetooth/l2cap.h	2012-10-30 01:04:38.709141050 +0100
++++ android_kernel_htc_primoc.new/include/net/bluetooth/l2cap.h	2012-10-30 01:04:50.384146365 +0100
+@@ -51,7 +51,7 @@
+ 
+ #define L2CAP_CONN_TIMEOUT	(40000) /* 40 seconds */
+ #define L2CAP_INFO_TIMEOUT	(4000)  /*  4 seconds */
+-#define L2CAP_MOVE_TIMEOUT		(2*HZ)  /*  2 seconds */
++#define L2CAP_MOVE_TIMEOUT		(4*HZ)  /*  4 seconds */
+ #define L2CAP_MOVE_ERTX_TIMEOUT		(60*HZ) /* 60 seconds */
+ 
+ /* L2CAP socket address */
+@@ -534,6 +534,7 @@
+ 
+ 	__u16		tx_win;
+ 	__u16		tx_win_max;
++	__u16		ack_win;
+ 	__u8		max_tx;
+ 	__u8		amp_pref;
+ 	__u16		remote_tx_win;
+@@ -653,13 +654,14 @@
+ #define L2CAP_ATT_MTU_RSP			0x03
+ #define L2CAP_ATT_RESPONSE_BIT			0x01
+ #define L2CAP_ATT_INDICATE			0x1D
++#define L2CAP_ATT_CONFIRM			0x1E
+ #define L2CAP_ATT_NOT_SUPPORTED			0x06
+ 
+ #define __delta_seq(x, y, pi) ((x) >= (y) ? (x) - (y) : \
+ 				(pi)->tx_win_max + 1 - (y) + (x))
+ #define __next_seq(x, pi) ((x + 1) & ((pi)->tx_win_max))
+ 
+-extern int disable_ertm;
++extern bool disable_ertm;
+ extern const struct proto_ops l2cap_sock_ops;
+ extern struct bt_sock_list l2cap_sk_list;
+ 
+@@ -685,6 +687,7 @@
+ int l2cap_ertm_tx(struct sock *sk, struct bt_l2cap_control *control,
+ 			struct sk_buff_head *skbs, u8 event);
+ 
++int l2cap_sock_le_params_valid(struct bt_le_params *le_params);
+ void l2cap_sock_set_timer(struct sock *sk, long timeout);
+ void l2cap_sock_clear_timer(struct sock *sk);
+ void __l2cap_sock_close(struct sock *sk, int reason);
+diff -u -r -N android_kernel_htc_primoc/include/net/bluetooth/mgmt.h android_kernel_htc_primoc.new/include/net/bluetooth/mgmt.h
+--- android_kernel_htc_primoc/include/net/bluetooth/mgmt.h	2012-10-30 01:04:38.710141051 +0100
++++ android_kernel_htc_primoc.new/include/net/bluetooth/mgmt.h	2012-10-30 01:04:50.391146368 +0100
+@@ -161,7 +161,6 @@
+ struct mgmt_cp_pair_device {
+ 	bdaddr_t bdaddr;
+ 	__u8 io_cap;
+-	__u8 ssp_cap;
+ } __packed;
+ struct mgmt_rp_pair_device {
+ 	bdaddr_t bdaddr;
+@@ -234,6 +233,19 @@
+ 	__u8 enable;
+ } __packed;
+ 
++#define MGMT_OP_SET_RSSI_REPORTER		0x0022
++struct mgmt_cp_set_rssi_reporter {
++	bdaddr_t	bdaddr;
++	__s8		rssi_threshold;
++	__le16	interval;
++	__u8		updateOnThreshExceed;
++} __packed;
++
++#define MGMT_OP_UNSET_RSSI_REPORTER		0x0023
++struct mgmt_cp_unset_rssi_reporter {
++	bdaddr_t	bdaddr;
++} __packed;
++
+ #define MGMT_EV_CMD_COMPLETE		0x0001
+ struct mgmt_ev_cmd_complete {
+ 	__le16 opcode;
+@@ -360,4 +372,10 @@
+ struct mgmt_ev_remote_features {
+ 	bdaddr_t bdaddr;
+ 	uint8_t features[8];
+-} __packed;
+\ No newline at end of file
++} __packed;
++
++#define MGMT_EV_RSSI_UPDATE		0x0020
++struct mgmt_ev_rssi_update {
++	bdaddr_t	bdaddr;
++	__s8			rssi;
++} __packed;
+diff -u -r -N android_kernel_htc_primoc/include/net/bluetooth/sco.h android_kernel_htc_primoc.new/include/net/bluetooth/sco.h
+--- android_kernel_htc_primoc/include/net/bluetooth/sco.h	2012-10-30 01:04:38.710141051 +0100
++++ android_kernel_htc_primoc.new/include/net/bluetooth/sco.h	2012-10-30 01:04:50.403146374 +0100
+@@ -1,6 +1,7 @@
+ /*
+    BlueZ - Bluetooth protocol stack for Linux
+    Copyright (C) 2000-2001 Qualcomm Incorporated
++   Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+ 
+    Written 2000,2001 by Maxim Krasnyansky <maxk@qualcomm.com>
+ 
+@@ -37,6 +38,8 @@
+ struct sockaddr_sco {
+ 	sa_family_t	sco_family;
+ 	bdaddr_t	sco_bdaddr;
++	__u16		sco_pkt_type;
++	__s8		is_wbs;
+ };
+ 
+ /* SCO socket options */
+@@ -72,7 +75,8 @@
+ 
+ struct sco_pinfo {
+ 	struct bt_sock	bt;
+-	__u32		flags;
++	__u16		pkt_type;
++
+ 	struct sco_conn	*conn;
+ };
+ 
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/amp.c android_kernel_htc_primoc.new/net/bluetooth/amp.c
+--- android_kernel_htc_primoc/net/bluetooth/amp.c	2012-10-30 01:04:39.340141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/amp.c	2012-10-30 01:04:10.243128069 +0100
+@@ -1,5 +1,5 @@
+ /*
+-   Copyright (c) 2010-2011 Code Aurora Forum.  All rights reserved.
++   Copyright (c) 2010-2012 Code Aurora Forum.  All rights reserved.
+ 
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License version 2 and
+@@ -11,6 +11,7 @@
+    GNU General Public License for more details.
+ */
+ 
++#include <linux/interrupt.h>
+ #include <linux/module.h>
+ #include <linux/types.h>
+ #include <linux/errno.h>
+@@ -87,15 +88,15 @@
+ 	return found;
+ }
+ 
+-static struct amp_mgr *get_create_amp_mgr(struct l2cap_conn *conn,
++static struct amp_mgr *get_create_amp_mgr(struct hci_conn *hcon,
+ 						struct sk_buff *skb)
+ {
+ 	struct amp_mgr *mgr;
+ 
+ 	write_lock(&amp_mgr_list_lock);
+ 	list_for_each_entry(mgr, &amp_mgr_list, list) {
+-		if (mgr->l2cap_conn == conn) {
+-			BT_DBG("conn %p found %p", conn, mgr);
++		if (mgr->l2cap_conn == hcon->l2cap_data) {
++			BT_DBG("found %p", mgr);
+ 			write_unlock(&amp_mgr_list_lock);
+ 			goto gc_finished;
+ 		}
+@@ -106,13 +107,13 @@
+ 	if (!mgr)
+ 		return NULL;
+ 
+-	mgr->l2cap_conn = conn;
++	mgr->l2cap_conn = hcon->l2cap_data;
+ 	mgr->next_ident = 1;
+ 	INIT_LIST_HEAD(&mgr->ctx_list);
+ 	rwlock_init(&mgr->ctx_list_lock);
+ 	mgr->skb = skb;
+-	BT_DBG("conn %p mgr %p", conn, mgr);
+-	mgr->a2mp_sock = open_fixed_channel(conn->src, conn->dst);
++	BT_DBG("hcon %p mgr %p", hcon, mgr);
++	mgr->a2mp_sock = open_fixed_channel(&hcon->hdev->bdaddr, &hcon->dst);
+ 	if (!mgr->a2mp_sock) {
+ 		kfree(mgr);
+ 		return NULL;
+@@ -374,13 +375,11 @@
+ {
+ 	struct amp_mgr *mgr;
+ 
+-	read_lock(&amp_mgr_list_lock);
+ 	list_for_each_entry(mgr, &amp_mgr_list, list) {
+ 		if (mgr->discovered)
+ 			send_a2mp_cl(mgr, next_ident(mgr),
+ 					A2MP_CHANGE_NOTIFY, 0, NULL);
+ 	}
+-	read_unlock(&amp_mgr_list_lock);
+ }
+ 
+ static inline int discover_req(struct amp_mgr *mgr, struct sk_buff *skb)
+@@ -484,7 +483,7 @@
+ 	struct amp_ctx *ctx = NULL;
+ 
+ 	BT_DBG("conn %p", conn);
+-	mgr = get_create_amp_mgr(conn, NULL);
++	mgr = get_create_amp_mgr(conn->hcon, NULL);
+ 	if (!mgr)
+ 		goto cp_finished;
+ 	BT_DBG("mgr %p", mgr);
+@@ -514,7 +513,7 @@
+ 	if (!hdev)
+ 		goto ap_finished;
+ 	BT_DBG("hdev %p", hdev);
+-	mgr = get_create_amp_mgr(lcon, NULL);
++	mgr = get_create_amp_mgr(lcon->hcon, NULL);
+ 	if (!mgr)
+ 		goto ap_finished;
+ 	BT_DBG("mgr %p", mgr);
+@@ -1034,8 +1033,8 @@
+ 	struct sk_buff *skb = data;
+ 	struct a2mp_cmd_hdr *hdr;
+ 	struct hci_ev_cmd_status *cs = data;
+-//	struct amp_ctx *cplctx;
+-//	struct a2mp_discover_req dreq;
++	struct amp_ctx *cplctx;
++	struct a2mp_discover_req dreq;
+ 	struct a2mp_discover_rsp *drsp;
+ 	u16 *efm;
+ 	struct a2mp_getinfo_req greq;
+@@ -1075,9 +1074,6 @@
+ 
+ 	switch (ctx->state) {
+ 	case AMP_CPL_INIT:
+-		result = -EAGAIN;
+-		goto cpl_finished;
+-/*
+ 		cplctx = get_ctx_type(ctx, AMP_CREATEPHYSLINK);
+ 		if (cplctx) {
+ 			BT_DBG("deferred to %p", cplctx);
+@@ -1091,7 +1087,6 @@
+ 		dreq.ext_feat = 0;
+ 		send_a2mp_cmd(ctx->mgr, ctx->rsp_ident, A2MP_DISCOVER_REQ,
+ 							sizeof(dreq), &dreq);
+-*/
+ 		break;
+ 
+ 	case AMP_CPL_DISC_RSP:
+@@ -1777,12 +1772,13 @@
+ static void conn_ind_worker(struct work_struct *w)
+ {
+ 	struct amp_work_conn_ind *work = (struct amp_work_conn_ind *) w;
+-	struct l2cap_conn *conn = work->conn;
++	struct hci_conn *hcon = work->hcon;
+ 	struct sk_buff *skb = work->skb;
+ 	struct amp_mgr *mgr;
+ 
+-	mgr = get_create_amp_mgr(conn, skb);
++	mgr = get_create_amp_mgr(hcon, skb);
+ 	BT_DBG("mgr %p", mgr);
++	hci_conn_put(hcon);
+ 	kfree(work);
+ }
+ 
+@@ -1808,17 +1804,20 @@
+ 
+ /* L2CAP Fixed Channel interface */
+ 
+-void amp_conn_ind(struct l2cap_conn *conn, struct sk_buff *skb)
++void amp_conn_ind(struct hci_conn *hcon, struct sk_buff *skb)
+ {
+ 	struct amp_work_conn_ind *work;
+-	BT_DBG("conn %p, skb %p", conn, skb);
++	BT_DBG("hcon %p, skb %p", hcon, skb);
+ 	work = kmalloc(sizeof(*work), GFP_ATOMIC);
+ 	if (work) {
+ 		INIT_WORK((struct work_struct *) work, conn_ind_worker);
+-		work->conn = conn;
++		hci_conn_hold(hcon);
++		work->hcon = hcon;
+ 		work->skb = skb;
+-		if (queue_work(amp_workqueue, (struct work_struct *) work) == 0)
++		if (!queue_work(amp_workqueue, (struct work_struct *) work)) {
++			hci_conn_put(hcon);
+ 			kfree(work);
++		}
+ 	}
+ }
+ 
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/bnep/bnep.h android_kernel_htc_primoc.new/net/bluetooth/bnep/bnep.h
+--- android_kernel_htc_primoc/net/bluetooth/bnep/bnep.h	2012-10-30 01:04:39.340141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/bnep/bnep.h	2012-10-30 01:04:10.296128085 +0100
+@@ -155,6 +155,7 @@
+ 	unsigned int  role;
+ 	unsigned long state;
+ 	unsigned long flags;
++	atomic_t      terminate;
+ 	struct task_struct *task;
+ 
+ 	struct ethhdr eh;
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/bnep/core.c android_kernel_htc_primoc.new/net/bluetooth/bnep/core.c
+--- android_kernel_htc_primoc/net/bluetooth/bnep/core.c	2012-10-30 01:04:39.340141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/bnep/core.c	2012-10-30 01:04:10.252128066 +0100
+@@ -26,6 +26,7 @@
+ */
+ 
+ #include <linux/module.h>
++#include <linux/interrupt.h>
+ 
+ #include <linux/kernel.h>
+ #include <linux/sched.h>
+@@ -56,8 +57,8 @@
+ 
+ #define VERSION "1.3"
+ 
+-static int compress_src = 1;
+-static int compress_dst = 1;
++static bool compress_src = 1;
++static bool compress_dst = 1;
+ 
+ static LIST_HEAD(bnep_session_list);
+ static DECLARE_RWSEM(bnep_session_sem);
+@@ -484,13 +485,18 @@
+ 
+ 	init_waitqueue_entry(&wait, current);
+ 	add_wait_queue(sk_sleep(sk), &wait);
+-	while (!kthread_should_stop()) {
++	while (1) {
+ 		set_current_state(TASK_INTERRUPTIBLE);
+ 
++		if (atomic_read(&s->terminate))
++			break;
+ 		/* RX */
+ 		while ((skb = skb_dequeue(&sk->sk_receive_queue))) {
+ 			skb_orphan(skb);
+-			bnep_rx_frame(s, skb);
++			if (!skb_linearize(skb))
++				bnep_rx_frame(s, skb);
++			else
++				kfree_skb(skb);
+ 		}
+ 
+ 		if (sk->sk_state != BT_CONNECTED)
+@@ -640,9 +646,10 @@
+ 	down_read(&bnep_session_sem);
+ 
+ 	s = __bnep_get_session(req->dst);
+-	if (s)
+-		kthread_stop(s->task);
+-	else
++	if (s) {
++		atomic_inc(&s->terminate);
++		wake_up_process(s->task);
++	} else
+ 		err = -ENOENT;
+ 
+ 	up_read(&bnep_session_sem);
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/bnep/Kconfig android_kernel_htc_primoc.new/net/bluetooth/bnep/Kconfig
+--- android_kernel_htc_primoc/net/bluetooth/bnep/Kconfig	2012-10-30 01:04:39.340141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/bnep/Kconfig	2012-10-30 01:04:10.269128072 +0100
+@@ -1,6 +1,6 @@
+ config BT_BNEP
+ 	tristate "BNEP protocol support"
+-	depends on BT && BT_L2CAP
++	depends on BT
+ 	select CRC32
+ 	help
+ 	  BNEP (Bluetooth Network Encapsulation Protocol) is Ethernet
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/bnep/netdev.c android_kernel_htc_primoc.new/net/bluetooth/bnep/netdev.c
+--- android_kernel_htc_primoc/net/bluetooth/bnep/netdev.c	2012-10-30 01:04:39.340141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/bnep/netdev.c	2012-10-30 01:04:10.396128131 +0100
+@@ -26,6 +26,7 @@
+ */
+ 
+ #include <linux/module.h>
++#include <linux/interrupt.h>
+ #include <linux/slab.h>
+ 
+ #include <linux/socket.h>
+@@ -217,7 +218,7 @@
+ 	.ndo_stop            = bnep_net_close,
+ 	.ndo_start_xmit	     = bnep_net_xmit,
+ 	.ndo_validate_addr   = eth_validate_addr,
+-	.ndo_set_multicast_list = bnep_net_set_mc_list,
++	.ndo_set_rx_mode     = bnep_net_set_mc_list,
+ 	.ndo_set_mac_address = bnep_net_set_mac_addr,
+ 	.ndo_tx_timeout      = bnep_net_timeout,
+ 	.ndo_change_mtu	     = eth_change_mtu,
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/cmtp/core.c android_kernel_htc_primoc.new/net/bluetooth/cmtp/core.c
+--- android_kernel_htc_primoc/net/bluetooth/cmtp/core.c	2012-10-30 01:04:39.341141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/cmtp/core.c	2012-10-30 01:04:10.396128131 +0100
+@@ -300,7 +300,10 @@
+ 
+ 		while ((skb = skb_dequeue(&sk->sk_receive_queue))) {
+ 			skb_orphan(skb);
+-			cmtp_recv_frame(session, skb);
++			if (!skb_linearize(skb))
++				cmtp_recv_frame(session, skb);
++			else
++				kfree_skb(skb);
+ 		}
+ 
+ 		cmtp_process_transmit(session);
+@@ -346,8 +349,7 @@
+ 
+ 	bacpy(&session->bdaddr, &bt_sk(sock->sk)->dst);
+ 
+-	session->mtu = min_t(uint, l2cap_pi(sock->sk)->chan->omtu,
+-					l2cap_pi(sock->sk)->chan->imtu);
++	session->mtu = min_t(uint, l2cap_pi(sock->sk)->omtu, l2cap_pi(sock->sk)->imtu);
+ 
+ 	BT_DBG("mtu %d", session->mtu);
+ 
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/cmtp/Kconfig android_kernel_htc_primoc.new/net/bluetooth/cmtp/Kconfig
+--- android_kernel_htc_primoc/net/bluetooth/cmtp/Kconfig	2012-10-30 01:04:39.341141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/cmtp/Kconfig	2012-10-30 01:04:10.405128136 +0100
+@@ -1,6 +1,6 @@
+ config BT_CMTP
+ 	tristate "CMTP protocol support"
+-	depends on BT && BT_L2CAP && ISDN_CAPI
++	depends on BT && ISDN_CAPI
+ 	help
+ 	  CMTP (CAPI Message Transport Protocol) is a transport layer
+ 	  for CAPI messages.  CMTP is required for the Bluetooth Common
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/hci_conn.c android_kernel_htc_primoc.new/net/bluetooth/hci_conn.c
+--- android_kernel_htc_primoc/net/bluetooth/hci_conn.c	2012-10-30 01:04:39.341141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/hci_conn.c	2012-10-30 01:04:10.432128148 +0100
+@@ -44,33 +44,77 @@
+ 
+ #include <net/bluetooth/bluetooth.h>
+ #include <net/bluetooth/hci_core.h>
++#include <net/bluetooth/l2cap.h>
+ 
+-static void hci_le_connect(struct hci_conn *conn)
++struct hci_conn *hci_le_connect(struct hci_dev *hdev, __u16 pkt_type,
++				bdaddr_t *dst, __u8 sec_level, __u8 auth_type,
++				struct bt_le_params *le_params)
+ {
+-	struct hci_dev *hdev = conn->hdev;
++	struct hci_conn *le;
+ 	struct hci_cp_le_create_conn cp;
++	struct adv_entry *entry;
++	struct link_key *key;
+ 
+-	BT_DBG("%p", conn);
++	BT_DBG("%p", hdev);
+ 
+-	conn->state = BT_CONNECT;
+-	conn->out = 1;
+-	conn->link_mode |= HCI_LM_MASTER;
+-	conn->sec_level = BT_SECURITY_LOW;
+-	conn->type = LE_LINK;
++	le = hci_conn_hash_lookup_ba(hdev, LE_LINK, dst);
++	if (le) {
++		hci_conn_hold(le);
++		return le;
++	}
++
++	key = hci_find_link_key_type(hdev, dst, KEY_TYPE_LTK);
++	if (!key) {
++		entry = hci_find_adv_entry(hdev, dst);
++		if (entry)
++			le = hci_le_conn_add(hdev, dst,
++					entry->bdaddr_type);
++		else
++			le = hci_le_conn_add(hdev, dst, 0);
++	} else {
++		le = hci_le_conn_add(hdev, dst, key->addr_type);
++	}
++
++	if (!le)
++		return ERR_PTR(-ENOMEM);
++
++	hci_conn_hold(le);
++
++	le->state = BT_CONNECT;
++	le->out = 1;
++	le->link_mode |= HCI_LM_MASTER;
++	le->sec_level = BT_SECURITY_LOW;
++	le->type = LE_LINK;
+ 
+ 	memset(&cp, 0, sizeof(cp));
+-	cp.scan_interval = cpu_to_le16(0x0004);
+-	cp.scan_window = cpu_to_le16(0x0004);
+-	bacpy(&cp.peer_addr, &conn->dst);
+-	cp.peer_addr_type = conn->dst_type;
+-	cp.conn_interval_min = cpu_to_le16(0x0008);
+-	cp.conn_interval_max = cpu_to_le16(0x0100);
+-	cp.supervision_timeout = cpu_to_le16(1000);
+-	cp.min_ce_len = cpu_to_le16(0x0001);
+-	cp.max_ce_len = cpu_to_le16(0x0001);
++	if (l2cap_sock_le_params_valid(le_params)) {
++		cp.supervision_timeout =
++				cpu_to_le16(le_params->supervision_timeout);
++		cp.scan_interval = cpu_to_le16(le_params->scan_interval);
++		cp.scan_window = cpu_to_le16(le_params->scan_window);
++		cp.conn_interval_min = cpu_to_le16(le_params->interval_min);
++		cp.conn_interval_max = cpu_to_le16(le_params->interval_max);
++		cp.conn_latency = cpu_to_le16(le_params->latency);
++		cp.min_ce_len = cpu_to_le16(le_params->min_ce_len);
++		cp.max_ce_len = cpu_to_le16(le_params->max_ce_len);
++		le->conn_timeout = le_params->conn_timeout;
++	} else {
++		cp.supervision_timeout = cpu_to_le16(BT_LE_SUP_TO_DEFAULT);
++		cp.scan_interval = cpu_to_le16(BT_LE_SCAN_INTERVAL_DEF);
++		cp.scan_window = cpu_to_le16(BT_LE_SCAN_WINDOW_DEF);
++		cp.conn_interval_min = cpu_to_le16(BT_LE_CONN_INTERVAL_MIN_DEF);
++		cp.conn_interval_max = cpu_to_le16(BT_LE_CONN_INTERVAL_MAX_DEF);
++		cp.conn_latency = cpu_to_le16(BT_LE_LATENCY_DEF);
++		le->conn_timeout = 5;
++	}
++	bacpy(&cp.peer_addr, &le->dst);
++	cp.peer_addr_type = le->dst_type;
+ 
+ 	hci_send_cmd(hdev, HCI_OP_LE_CREATE_CONN, sizeof(cp), &cp);
++
++	return le;
+ }
++EXPORT_SYMBOL(hci_le_connect);
+ 
+ static void hci_le_connect_cancel(struct hci_conn *conn)
+ {
+@@ -225,6 +269,18 @@
+ }
+ EXPORT_SYMBOL(hci_le_conn_update);
+ 
++void hci_read_rssi(struct hci_conn *conn)
++{
++	struct hci_cp_read_rssi cp;
++	struct hci_dev *hdev = conn->hdev;
++
++	memset(&cp, 0, sizeof(cp));
++	cp.handle   = cpu_to_le16(conn->handle);
++
++	hci_send_cmd(hdev, HCI_OP_READ_RSSI, sizeof(cp), &cp);
++}
++EXPORT_SYMBOL(hci_read_rssi);
++
+ void hci_le_start_enc(struct hci_conn *conn, __le16 ediv, __u8 rand[8],
+ 							__u8 ltk[16])
+ {
+@@ -340,12 +396,34 @@
+ 	hci_conn_enter_sniff_mode(conn);
+ }
+ 
++static void hci_conn_rssi_update(struct work_struct *work)
++{
++	struct delayed_work *delayed =
++		container_of(work, struct delayed_work, work);
++	struct hci_conn *conn =
++		container_of(delayed, struct hci_conn, rssi_update_work);
++
++	BT_DBG("conn %p mode %d", conn, conn->mode);
++
++	hci_read_rssi(conn);
++}
++
+ static void encryption_disabled_timeout(unsigned long userdata)
+ {
+ 	struct hci_conn *conn = (struct hci_conn *)userdata;
+-	BT_DBG("conn %p Grace Prd Exp ", conn);
++	BT_INFO("conn %p Grace Prd Exp ", conn);
+ 
+ 	hci_encrypt_cfm(conn, 0, 0);
++
++	if (test_bit(HCI_CONN_ENCRYPT_PEND, &conn->pend)) {
++		struct hci_cp_set_conn_encrypt cp;
++		BT_INFO("HCI_CONN_ENCRYPT_PEND is set");
++		cp.handle  = cpu_to_le16(conn->handle);
++		cp.encrypt = 1;
++		hci_send_cmd(conn->hdev, HCI_OP_SET_CONN_ENCRYPT,
++						sizeof(cp), &cp);
++	}
++
+ }
+ 
+ struct hci_conn *hci_conn_add(struct hci_dev *hdev, int type,
+@@ -370,6 +448,7 @@
+ 
+ 	conn->power_save = 1;
+ 	conn->disc_timeout = HCI_DISCONN_TIMEOUT;
++	wake_lock_init(&conn->idle_lock, WAKE_LOCK_SUSPEND, "bt_idle");
+ 
+ 	switch (type) {
+ 	case ACL_LINK:
+@@ -400,6 +479,7 @@
+ 
+ 	setup_timer(&conn->disc_timer, hci_conn_timeout, (unsigned long)conn);
+ 	setup_timer(&conn->idle_timer, hci_conn_idle, (unsigned long)conn);
++	INIT_DELAYED_WORK(&conn->rssi_update_work, hci_conn_rssi_update);
+ 	setup_timer(&conn->encrypt_pause_timer, encryption_disabled_timeout,
+ 			(unsigned long)conn);
+ 
+@@ -442,8 +522,10 @@
+ 
+ 	/* Make sure no timers are running */
+ 	del_timer(&conn->idle_timer);
++	wake_lock_destroy(&conn->idle_lock);
+ 	del_timer(&conn->disc_timer);
+ 	del_timer(&conn->smp_timer);
++	__cancel_delayed_work(&conn->rssi_update_work);
+ 	del_timer(&conn->encrypt_pause_timer);
+ 
+ 	if (conn->type == ACL_LINK) {
+@@ -482,11 +564,6 @@
+ 
+ 	hci_dev_put(hdev);
+ 
+-	/* free it if no handle */
+-	if (conn->handle == 0)
+-		kfree(conn);
+-
+-
+ 	return 0;
+ }
+ 
+@@ -510,6 +587,7 @@
+ 
+ 	return chan;
+ }
++EXPORT_SYMBOL(hci_chan_add);
+ 
+ int hci_chan_del(struct hci_chan *chan)
+ {
+@@ -653,41 +731,12 @@
+ {
+ 	struct hci_conn *acl;
+ 	struct hci_conn *sco;
+-	struct hci_conn *le;
+ 
+ 	BT_DBG("%s dst %s", hdev->name, batostr(dst));
+ 
+-	if (type == LE_LINK) {
+-		struct adv_entry *entry;
+-		struct link_key *key;
+-
+-		le = hci_conn_hash_lookup_ba(hdev, LE_LINK, dst);
+-		if (le) {
+-			hci_conn_hold(le);
+-			return le;
+-		}
+-
+-		key = hci_find_link_key_type(hdev, dst, KEY_TYPE_LTK);
+-		if (!key) {
+-			entry = hci_find_adv_entry(hdev, dst);
+-			if (entry)
+-				le = hci_le_conn_add(hdev, dst,
+-						entry->bdaddr_type);
+-			else
+-				le = hci_le_conn_add(hdev, dst, 0);
+-		} else {
+-			le = hci_le_conn_add(hdev, dst, key->addr_type);
+-		}
+-
+-		if (!le)
+-			return ERR_PTR(-ENOMEM);
+-
+-		hci_le_connect(le);
+-
+-		hci_conn_hold(le);
+-
+-		return le;
+-	}
++	if (type == LE_LINK)
++		return hci_le_connect(hdev, pkt_type, dst, sec_level,
++							auth_type, NULL);
+ 
+ 	acl = hci_conn_hash_lookup_ba(hdev, ACL_LINK, dst);
+ 	if (!acl) {
+@@ -843,6 +892,10 @@
+ 
+ 	if (hci_conn_auth(conn, sec_level, auth_type)) {
+ 		struct hci_cp_set_conn_encrypt cp;
++		if (timer_pending(&conn->encrypt_pause_timer)) {
++			BT_INFO("encrypt_pause_timer is pending");
++			return 0;
++		}
+ 		cp.handle  = cpu_to_le16(conn->handle);
+ 		cp.encrypt = 1;
+ 		hci_send_cmd(conn->hdev, HCI_OP_SET_CONN_ENCRYPT,
+@@ -911,9 +964,48 @@
+ 	}
+ 
+ timer:
+-	if (hdev->idle_timeout > 0)
++	if (hdev->idle_timeout > 0) {
+ 		mod_timer(&conn->idle_timer,
+ 			jiffies + msecs_to_jiffies(hdev->idle_timeout));
++		wake_lock(&conn->idle_lock);
++	}
++}
++
++static inline void hci_conn_stop_rssi_timer(struct hci_conn *conn)
++{
++	BT_DBG("conn %p", conn);
++	cancel_delayed_work(&conn->rssi_update_work);
++}
++
++static inline void hci_conn_start_rssi_timer(struct hci_conn *conn,
++	u16 interval)
++{
++	struct hci_dev *hdev = conn->hdev;
++	BT_DBG("conn %p, pending %d", conn,
++			delayed_work_pending(&conn->rssi_update_work));
++	if (!delayed_work_pending(&conn->rssi_update_work)) {
++		queue_delayed_work(hdev->workqueue, &conn->rssi_update_work,
++				msecs_to_jiffies(interval));
++	}
++}
++
++void hci_conn_set_rssi_reporter(struct hci_conn *conn,
++	s8 rssi_threshold, u16 interval, u8 updateOnThreshExceed)
++{
++	if (conn) {
++		conn->rssi_threshold = rssi_threshold;
++		conn->rssi_update_interval = interval;
++		conn->rssi_update_thresh_exceed = updateOnThreshExceed;
++		hci_conn_start_rssi_timer(conn, interval);
++	}
++}
++
++void hci_conn_unset_rssi_reporter(struct hci_conn *conn)
++{
++	if (conn) {
++		BT_DBG("Deleting the rssi_update_timer");
++		hci_conn_stop_rssi_timer(conn);
++	}
+ }
+ 
+ /* Enter sniff mode */
+@@ -954,51 +1046,12 @@
+ 	}
+ }
+ 
+-struct hci_chan *hci_chan_accept(struct hci_conn *conn,
+-			struct hci_ext_fs *tx_fs, struct hci_ext_fs *rx_fs)
+-{
+-	struct hci_chan *chan;
+-	struct hci_cp_create_logical_link cp;
+-
+-	chan = hci_chan_add(conn->hdev);
+-	if (!chan)
+-		return NULL;
+-
+-	chan->state = BT_CONNECT;
+-	chan->conn = conn;
+-	chan->tx_fs = *tx_fs;
+-	chan->rx_fs = *rx_fs;
+-	cp.phy_handle = chan->conn->handle;
+-	cp.tx_fs.id = chan->tx_fs.id;
+-	cp.tx_fs.type = chan->tx_fs.type;
+-	cp.tx_fs.max_sdu = cpu_to_le16(chan->tx_fs.max_sdu);
+-	cp.tx_fs.sdu_arr_time = cpu_to_le32(chan->tx_fs.sdu_arr_time);
+-	cp.tx_fs.acc_latency = cpu_to_le32(chan->tx_fs.acc_latency);
+-	cp.tx_fs.flush_to = cpu_to_le32(chan->tx_fs.flush_to);
+-	cp.rx_fs.id = chan->rx_fs.id;
+-	cp.rx_fs.type = chan->rx_fs.type;
+-	cp.rx_fs.max_sdu = cpu_to_le16(chan->rx_fs.max_sdu);
+-	cp.rx_fs.sdu_arr_time = cpu_to_le32(chan->rx_fs.sdu_arr_time);
+-	cp.rx_fs.acc_latency = cpu_to_le32(chan->rx_fs.acc_latency);
+-	cp.rx_fs.flush_to = cpu_to_le32(chan->rx_fs.flush_to);
+-	hci_conn_hold(chan->conn);
+-	hci_send_cmd(conn->hdev, HCI_OP_ACCEPT_LOGICAL_LINK, sizeof(cp), &cp);
+-	return chan;
+-}
+-EXPORT_SYMBOL(hci_chan_accept);
+-
+-struct hci_chan *hci_chan_create(struct hci_conn *conn,
++struct hci_chan *hci_chan_create(struct hci_chan *chan,
+ 			struct hci_ext_fs *tx_fs, struct hci_ext_fs *rx_fs)
+ {
+-	struct hci_chan *chan;
+ 	struct hci_cp_create_logical_link cp;
+ 
+-	chan = hci_chan_add(conn->hdev);
+-	if (!chan)
+-		return NULL;
+-
+ 	chan->state = BT_CONNECT;
+-	chan->conn = conn;
+ 	chan->tx_fs = *tx_fs;
+ 	chan->rx_fs = *rx_fs;
+ 	cp.phy_handle = chan->conn->handle;
+@@ -1015,7 +1068,12 @@
+ 	cp.rx_fs.acc_latency = cpu_to_le32(chan->rx_fs.acc_latency);
+ 	cp.rx_fs.flush_to = cpu_to_le32(chan->rx_fs.flush_to);
+ 	hci_conn_hold(chan->conn);
+-	hci_send_cmd(conn->hdev, HCI_OP_CREATE_LOGICAL_LINK, sizeof(cp), &cp);
++	if (chan->conn->out)
++		hci_send_cmd(chan->conn->hdev, HCI_OP_CREATE_LOGICAL_LINK,
++							sizeof(cp), &cp);
++	else
++		hci_send_cmd(chan->conn->hdev, HCI_OP_ACCEPT_LOGICAL_LINK,
++							sizeof(cp), &cp);
+ 	return chan;
+ }
+ EXPORT_SYMBOL(hci_chan_create);
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/hci_core.c android_kernel_htc_primoc.new/net/bluetooth/hci_core.c
+--- android_kernel_htc_primoc/net/bluetooth/hci_core.c	2012-10-30 01:04:39.341141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/hci_core.c	2012-10-30 01:04:10.451128155 +0100
+@@ -60,7 +60,7 @@
+ 
+ static DEFINE_RWLOCK(hci_task_lock);
+ 
+-static int enable_smp = 1;
++static bool enable_smp = 1;
+ 
+ /* HCI device list */
+ LIST_HEAD(hci_dev_list);
+@@ -543,11 +543,6 @@
+ 
+ 	hci_req_lock(hdev);
+ 
+-	if (test_bit(HCI_UNREGISTER, &hdev->flags)) {
+-		ret = -ENODEV;
+-		goto done;
+-	}
+-
+ 	if (hdev->rfkill && rfkill_blocked(hdev->rfkill)) {
+ 		ret = -ERFKILL;
+ 		goto done;
+@@ -1564,13 +1559,11 @@
+ 
+ 	BT_DBG("%p name %s bus %d", hdev, hdev->name, hdev->bus);
+ 
+-	set_bit(HCI_UNREGISTER, &hdev->flags);
+-
+ 	write_lock_bh(&hci_dev_list_lock);
+ 	list_del(&hdev->list);
+ 	write_unlock_bh(&hci_dev_list_lock);
+ 
+-	hci_dev_do_close(hdev, 0);
++	hci_dev_do_close(hdev, hdev->bus == HCI_SMD);
+ 
+ 	for (i = 0; i < NUM_REASSEMBLY; i++)
+ 		kfree_skb(hdev->reassembly[i]);
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/hci_event.c android_kernel_htc_primoc.new/net/bluetooth/hci_event.c
+--- android_kernel_htc_primoc/net/bluetooth/hci_event.c	2012-10-30 01:04:39.341141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/hci_event.c	2012-10-30 01:04:10.467128163 +0100
+@@ -940,6 +940,21 @@
+ 	hci_dev_unlock(hdev);
+ }
+ 
++static void hci_cc_read_rssi(struct hci_dev *hdev, struct sk_buff *skb)
++{
++	struct hci_conn *conn;
++	struct hci_rp_read_rssi *rp = (void *) skb->data;
++
++	BT_DBG("%s status 0x%x", hdev->name, rp->status);
++
++	BT_DBG("%s rssi : %d handle : %d", hdev->name, rp->rssi, rp->handle);
++
++	conn = hci_conn_hash_lookup_handle(hdev, __le16_to_cpu(rp->handle));
++	if (conn)
++		mgmt_read_rssi_complete(hdev->id, rp->rssi, &conn->dst,
++			__le16_to_cpu(rp->handle), rp->status);
++}
++
+ static void hci_cc_read_local_oob_data_reply(struct hci_dev *hdev,
+ 							struct sk_buff *skb)
+ {
+@@ -1353,6 +1368,7 @@
+ {
+ 	struct hci_cp_le_create_conn *cp;
+ 	struct hci_conn *conn;
++	unsigned long exp = msecs_to_jiffies(5000);
+ 
+ 	BT_DBG("%s status 0x%x", hdev->name, status);
+ 
+@@ -1381,11 +1397,11 @@
+ 				conn->out = 1;
+ 			else
+ 				BT_ERR("No memory for new connection");
+-		}
++		} else
++			exp = msecs_to_jiffies(conn->conn_timeout * 1000);
+ 
+-		if (conn)
+-			mod_timer(&conn->disc_timer,
+-					jiffies + msecs_to_jiffies(5000));
++		if (conn && exp)
++			mod_timer(&conn->disc_timer, jiffies + exp);
+ 	}
+ 
+ 	hci_dev_unlock(hdev);
+@@ -1533,7 +1549,7 @@
+ 
+ 	BT_DBG("%s status %d", hdev->name, status);
+ 
+-	if (!lmp_le_capable(hdev))
++	if (!hdev->disco_state)
+ 		clear_bit(HCI_INQUIRY, &hdev->flags);
+ 
+ 	hci_req_complete(hdev, HCI_OP_INQUIRY, status);
+@@ -1659,6 +1675,15 @@
+ 	hci_conn_check_pending(hdev);
+ }
+ 
++static inline bool is_sco_active(struct hci_dev *hdev)
++{
++	if (hci_conn_hash_lookup_state(hdev, SCO_LINK, BT_CONNECTED) ||
++			(hci_conn_hash_lookup_state(hdev, ESCO_LINK,
++						    BT_CONNECTED)))
++		return true;
++	return false;
++}
++
+ static inline void hci_conn_request_evt(struct hci_dev *hdev, struct sk_buff *skb)
+ {
+ 	struct hci_ev_conn_request *ev = (void *) skb->data;
+@@ -1704,7 +1729,8 @@
+ 
+ 			bacpy(&cp.bdaddr, &ev->bdaddr);
+ 
+-			if (lmp_rswitch_capable(hdev) && (mask & HCI_LM_MASTER))
++			if (lmp_rswitch_capable(hdev) && ((mask & HCI_LM_MASTER)
++						|| is_sco_active(hdev)))
+ 				cp.role = 0x00; /* Become master */
+ 			else
+ 				cp.role = 0x01; /* Remain slave */
+@@ -1787,6 +1813,15 @@
+ 			struct hci_cp_auth_requested cp;
+ 			hci_remove_link_key(hdev, &conn->dst);
+ 			cp.handle = cpu_to_le16(conn->handle);
++			/*Initiates dedicated bonding as pin or key is missing
++			on remote device*/
++			/*In case if remote device is ssp supported,
++			reduce the security level to MEDIUM if it is HIGH*/
++			if (conn->ssp_mode && conn->auth_initiator &&
++				conn->io_capability != 0x03) {
++				conn->pending_sec_level = BT_SECURITY_HIGH;
++				conn->auth_type = HCI_AT_DEDICATED_BONDING_MITM;
++			}
+ 			hci_send_cmd(conn->hdev, HCI_OP_AUTH_REQUESTED,
+ 							sizeof(cp), &cp);
+ 			hci_dev_unlock(hdev);
+@@ -1831,27 +1866,24 @@
+ 					/* Encryption implies authentication */
+ 					conn->link_mode |= HCI_LM_AUTH;
+ 					conn->link_mode |= HCI_LM_ENCRYPT;
+-					conn->sec_level = conn->pending_sec_level;
+-
+-					clear_bit(HCI_CONN_ENCRYPT_PEND, &conn->pend);
+-
+-					if (conn->state == BT_CONFIG) {
+-						conn->state = BT_CONNECTED;
+-
+-						hci_proto_connect_cfm(conn, ev->status);
+-						hci_conn_put(conn);
+-					} else
+-						hci_encrypt_cfm(conn, ev->status, 1);
++					conn->sec_level =
++						conn->pending_sec_level;
++					clear_bit(HCI_CONN_ENCRYPT_PEND,
++							&conn->pend);
++					hci_encrypt_cfm(conn, ev->status, 1);
+ 
+ 					if (test_bit(HCI_MGMT, &hdev->flags))
+-						mgmt_encrypt_change(hdev->id, &conn->dst, ev->status);
++						mgmt_encrypt_change(hdev->id,
++							&conn->dst,
++							ev->status);
+ 
+ 				} else {
+ 					struct hci_cp_set_conn_encrypt cp;
+ 					cp.handle  = ev->handle;
+ 					cp.encrypt = 0x01;
+-					hci_send_cmd(hdev, HCI_OP_SET_CONN_ENCRYPT,
+-								sizeof(cp), &cp);
++					hci_send_cmd(hdev,
++						HCI_OP_SET_CONN_ENCRYPT,
++						sizeof(cp), &cp);
+ 				}
+ 			} else {
+ 				clear_bit(HCI_CONN_ENCRYPT_PEND, &conn->pend);
+@@ -1929,6 +1961,7 @@
+ 				((conn->features[5] & LMP_PAUSE_ENC) == 0)) {
+ 				mod_timer(&conn->encrypt_pause_timer,
+ 					jiffies + msecs_to_jiffies(500));
++				BT_INFO("enc pause timer, enc_pend_flag set");
+ 			} else {
+ 				del_timer(&conn->encrypt_pause_timer);
+ 				hci_encrypt_cfm(conn, ev->status, ev->encrypt);
+@@ -1992,6 +2025,9 @@
+ 		hci_send_cmd(hdev, HCI_OP_READ_REMOTE_EXT_FEATURES,
+ 							sizeof(cp), &cp);
+ 		goto unlock;
++	} else  if (!(lmp_ssp_capable(conn)) && conn->auth_initiator &&
++		(conn->pending_sec_level == BT_SECURITY_HIGH)) {
++		conn->pending_sec_level = BT_SECURITY_MEDIUM;
+ 	}
+ 
+ 	if (!ev->status) {
+@@ -2048,6 +2084,9 @@
+ 
+ 	opcode = __le16_to_cpu(ev->opcode);
+ 
++	if (test_bit(HCI_RESET, &hdev->flags) && (opcode != HCI_OP_RESET))
++		return;
++
+ 	switch (opcode) {
+ 	case HCI_OP_INQUIRY_CANCEL:
+ 		hci_cc_inquiry_cancel(hdev, skb);
+@@ -2214,6 +2253,10 @@
+ 		hci_cc_le_read_buffer_size(hdev, skb);
+ 		break;
+ 
++	case HCI_OP_READ_RSSI:
++		hci_cc_read_rssi(hdev, skb);
++		break;
++
+ 	case HCI_OP_USER_CONFIRM_REPLY:
+ 		hci_cc_user_confirm_reply(hdev, skb);
+ 		break;
+@@ -2525,6 +2568,9 @@
+ 			else
+ 				conn->power_save = 0;
+ 		}
++		if (conn->mode == HCI_CM_SNIFF)
++			if (wake_lock_active(&conn->idle_lock))
++				wake_unlock(&conn->idle_lock);
+ 
+ 		if (test_and_clear_bit(HCI_CONN_SCO_SETUP_PEND, &conn->pend))
+ 			hci_sco_setup(conn, ev->status);
+@@ -2595,14 +2641,12 @@
+ 		BT_DBG("Conn pending sec level is %d, ssp is %d, key len is %d",
+ 			conn->pending_sec_level, conn->ssp_mode, key->pin_len);
+ 	}
+-	/* htc, only used for sap
+ 	if (conn && (conn->ssp_mode == 0) &&
+ 		(conn->pending_sec_level == BT_SECURITY_HIGH) &&
+ 		(key->pin_len != 16)) {
+ 		BT_DBG("Security is high ignoring this key");
+ 		goto not_found;
+ 	}
+-	*/
+ 
+ 	if (key->key_type == 0x04 && conn && conn->auth_type != 0xff &&
+ 						(conn->auth_type & 0x01)) {
+@@ -2786,22 +2830,16 @@
+ 			ie->data.ssp_mode = (ev->features[0] & 0x01);
+ 
+ 		conn->ssp_mode = (ev->features[0] & 0x01);
+-
+-		/* In case if remote device ssp is not supported/2.0 device
+-		reduce the security level to MEDIUM if it is HIGH. An if remote
+-		device supports ssp then raise the security level to HIGH if it
+-		is MEDIUM */
+-		if (conn->ssp_mode) {
+-			if (conn->auth_initiator &&
+-				(conn->io_capability != 0x03) &&
+-				(conn->auth_type & HCI_AT_DEDICATED_BONDING) &&
+-				(conn->pending_sec_level == BT_SECURITY_MEDIUM)) {
+-				conn->pending_sec_level = BT_SECURITY_HIGH;
+-				conn->auth_type = HCI_AT_DEDICATED_BONDING_MITM;
+-			}
+-		} else {
+-			if (conn->pending_sec_level == BT_SECURITY_HIGH)
+-				conn->pending_sec_level = BT_SECURITY_MEDIUM;
++		/*In case if remote device ssp supported/2.0 device
++		reduce the security level to MEDIUM if it is HIGH*/
++		if (!conn->ssp_mode && conn->auth_initiator &&
++			(conn->pending_sec_level == BT_SECURITY_HIGH))
++			conn->pending_sec_level = BT_SECURITY_MEDIUM;
++
++		if (conn->ssp_mode && conn->auth_initiator &&
++			conn->io_capability != 0x03) {
++			conn->pending_sec_level = BT_SECURITY_HIGH;
++			conn->auth_type = HCI_AT_DEDICATED_BONDING_MITM;
+ 		}
+ 	}
+ 
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/hci_sock.c android_kernel_htc_primoc.new/net/bluetooth/hci_sock.c
+--- android_kernel_htc_primoc/net/bluetooth/hci_sock.c	2012-10-30 01:04:39.342141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/hci_sock.c	2012-10-30 01:04:10.468128164 +0100
+@@ -49,7 +49,7 @@
+ #include <net/bluetooth/bluetooth.h>
+ #include <net/bluetooth/hci_core.h>
+ 
+-static int enable_mgmt = 1;
++static bool enable_mgmt = 1;
+ 
+ /* ----- HCI socket interface ----- */
+ 
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/hci_sysfs.c android_kernel_htc_primoc.new/net/bluetooth/hci_sysfs.c
+--- android_kernel_htc_primoc/net/bluetooth/hci_sysfs.c	2012-10-30 01:04:39.342141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/hci_sysfs.c	2012-10-30 01:04:10.468128164 +0100
+@@ -5,6 +5,8 @@
+ #include <linux/init.h>
+ #include <linux/debugfs.h>
+ #include <linux/seq_file.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
+ 
+ #include <net/bluetooth/bluetooth.h>
+ #include <net/bluetooth/hci_core.h>
+@@ -164,9 +166,6 @@
+ {
+ 	BT_DBG("conn %p", conn);
+ 
+-	if (conn == NULL || conn->hdev == NULL || conn->hdev->workqueue == NULL)
+-		return;
+-
+ 	queue_work(conn->hdev->workqueue, &conn->work_del);
+ }
+ 
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/hidp/core.c android_kernel_htc_primoc.new/net/bluetooth/hidp/core.c
+--- android_kernel_htc_primoc/net/bluetooth/hidp/core.c	2012-10-30 01:04:39.342141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/hidp/core.c	2012-10-30 01:04:10.515128186 +0100
+@@ -1,6 +1,7 @@
+ /*
+    HIDP implementation for Linux Bluetooth stack (BlueZ).
+    Copyright (C) 2003-2004 Marcel Holtmann <marcel@holtmann.org>
++   Copyright (c) 2012 Code Aurora Forum.  All rights reserved.
+ 
+    This program is free software; you can redistribute it and/or modify
+    it under the terms of the GNU General Public License version 2 as
+@@ -21,6 +22,7 @@
+ */
+ 
+ #include <linux/module.h>
++#include <linux/interrupt.h>
+ 
+ #include <linux/types.h>
+ #include <linux/errno.h>
+@@ -91,6 +93,26 @@
+ 	return NULL;
+ }
+ 
++static struct device *hidp_get_device(struct hidp_session *session)
++{
++	bdaddr_t *src = &bt_sk(session->ctrl_sock->sk)->src;
++	bdaddr_t *dst = &bt_sk(session->ctrl_sock->sk)->dst;
++	struct device *device = NULL;
++	struct hci_dev *hdev;
++
++	hdev = hci_get_route(dst, src);
++	if (!hdev)
++		return NULL;
++
++	session->conn = hci_conn_hash_lookup_ba(hdev, ACL_LINK, dst);
++	if (session->conn)
++		device = &session->conn->dev;
++
++	hci_dev_put(hdev);
++
++	return device;
++}
++
+ static void __hidp_link_session(struct hidp_session *session)
+ {
+ 	__module_get(THIS_MODULE);
+@@ -101,7 +123,11 @@
+ 
+ static void __hidp_unlink_session(struct hidp_session *session)
+ {
+-	hci_conn_put_device(session->conn);
++	struct device *dev;
++
++	dev = hidp_get_device(session);
++	if (dev)
++		hci_conn_put_device(session->conn);
+ 
+ 	list_del(&session->list);
+ 	module_put(THIS_MODULE);
+@@ -634,26 +660,6 @@
+ 	return 0;
+ }
+ 
+-static struct device *hidp_get_device(struct hidp_session *session)
+-{
+-	bdaddr_t *src = &bt_sk(session->ctrl_sock->sk)->src;
+-	bdaddr_t *dst = &bt_sk(session->ctrl_sock->sk)->dst;
+-	struct device *device = NULL;
+-	struct hci_dev *hdev;
+-
+-	hdev = hci_get_route(dst, src);
+-	if (!hdev)
+-		return NULL;
+-
+-	session->conn = hci_conn_hash_lookup_ba(hdev, ACL_LINK, dst);
+-	if (session->conn)
+-		device = &session->conn->dev;
+-
+-	hci_dev_put(hdev);
+-
+-	return device;
+-}
+-
+ static int hidp_setup_input(struct hidp_session *session,
+ 				struct hidp_connadd_req *req)
+ {
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/hidp/Kconfig android_kernel_htc_primoc.new/net/bluetooth/hidp/Kconfig
+--- android_kernel_htc_primoc/net/bluetooth/hidp/Kconfig	2012-10-30 01:04:39.342141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/hidp/Kconfig	2012-10-30 01:04:10.516128186 +0100
+@@ -1,6 +1,6 @@
+ config BT_HIDP
+ 	tristate "HIDP protocol support"
+-	depends on BT && BT_L2CAP && INPUT && HID_SUPPORT
++	depends on BT && INPUT && HID_SUPPORT
+ 	select HID
+ 	help
+ 	  HIDP (Human Interface Device Protocol) is a transport layer
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/Kconfig android_kernel_htc_primoc.new/net/bluetooth/Kconfig
+--- android_kernel_htc_primoc/net/bluetooth/Kconfig	2012-10-30 01:04:39.340141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/Kconfig	2012-10-30 01:04:10.558128205 +0100
+@@ -6,6 +6,13 @@
+ 	tristate "Bluetooth subsystem support"
+ 	depends on NET && !S390
+ 	depends on RFKILL || !RFKILL
++	select CRC16
++	select CRYPTO
++	select CRYPTO_BLKCIPHER
++	select CRYPTO_AES
++	select CRYPTO_ECB
++	select CRYPTO_HMAC
++	select CRYPTO_SHA256
+ 	help
+ 	  Bluetooth is low-cost, low-power, short-range wireless technology.
+ 	  It was designed as a replacement for cables and other short-range
+@@ -14,15 +21,16 @@
+ 	  Bluetooth can be found at <http://www.bluetooth.com/>.
+ 
+ 	  Linux Bluetooth subsystem consist of several layers:
+-	     Bluetooth Core (HCI device and connection manager, scheduler)
++	     Bluetooth Core
++		HCI device and connection manager, scheduler
++		SCO audio links
++		L2CAP (Logical Link Control and Adaptation Protocol)
++		SMP (Security Manager Protocol) on LE (Low Energy) links
+ 	     HCI Device drivers (Interface to the hardware)
+-	     SCO Module (SCO audio links)
+-	     L2CAP Module (Logical Link Control and Adaptation Protocol)
+ 	     RFCOMM Module (RFCOMM Protocol)  
+ 	     BNEP Module (Bluetooth Network Encapsulation Protocol)
+ 	     CMTP Module (CAPI Message Transport Protocol)
+ 	     HIDP Module (Human Interface Device Protocol)
+-	     SMP Module (Security Manager Protocol)
+ 
+ 	  Say Y here to compile Bluetooth support into the kernel or say M to
+ 	  compile it as module (bluetooth).
+@@ -32,33 +40,6 @@
+ 	  to Bluetooth kernel modules are provided in the BlueZ packages.  For
+ 	  more information, see <http://www.bluez.org/>.
+ 
+-if BT != n
+-
+-config BT_L2CAP
+-	bool "L2CAP protocol support"
+-	depends on CRYPTO_HMAC
+-	depends on CRYPTO_SHA256
+-	select CRC16
+-	select CRYPTO_BLKCIPHER
+-	select CRYPTO_AES
+-	select CRYPTO_ECB
+-	select CRYPTO_MANAGER
+-	help
+-	  L2CAP (Logical Link Control and Adaptation Protocol) provides
+-	  connection oriented and connection-less data transport.  L2CAP
+-	  support is required for most Bluetooth applications.
+-
+-	  Also included is support for SMP (Security Manager Protocol) which
+-	  is the security layer on top of LE (Low Energy) links.
+-
+-config BT_SCO
+-	bool "SCO links support"
+-	help
+-	  SCO link provides voice transport over Bluetooth.  SCO support is
+-	  required for voice applications like Headset and Audio.
+-
+-endif
+-
+ source "net/bluetooth/rfcomm/Kconfig"
+ 
+ source "net/bluetooth/bnep/Kconfig"
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/l2cap_core.c android_kernel_htc_primoc.new/net/bluetooth/l2cap_core.c
+--- android_kernel_htc_primoc/net/bluetooth/l2cap_core.c	2012-10-30 01:04:39.343141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/l2cap_core.c	2012-10-30 01:04:10.573128212 +0100
+@@ -58,11 +58,12 @@
+ #include <net/bluetooth/smp.h>
+ #include <net/bluetooth/amp.h>
+ 
+-int disable_ertm;
+-int enable_reconfig;
++bool disable_ertm;
++bool enable_hs;
++bool enable_reconfig;
+ 
+ static u32 l2cap_feat_mask = L2CAP_FEAT_FIXED_CHAN;
+-static u8 l2cap_fixed_chan[8] = { L2CAP_FC_L2CAP | L2CAP_FC_A2MP, };
++static u8 l2cap_fc_mask = L2CAP_FC_L2CAP;
+ 
+ struct workqueue_struct *_l2cap_wq;
+ 
+@@ -559,16 +560,15 @@
+ 		read_unlock(&l->lock);
+ 	}
+ 
+-	if (l2cap_pi(sk)->ampcon) {
+-		l2cap_pi(sk)->ampcon->l2cap_data = NULL;
+-		l2cap_pi(sk)->ampcon = NULL;
+-		l2cap_pi(sk)->amp_id = 0;
+-	}
+-
+ 	if (l2cap_pi(sk)->ampchan) {
+ 		struct hci_chan *ampchan = l2cap_pi(sk)->ampchan;
++		struct hci_conn *ampcon = l2cap_pi(sk)->ampcon;
+ 		l2cap_pi(sk)->ampchan = NULL;
+-		if (!hci_chan_put(ampchan))
++		l2cap_pi(sk)->ampcon = NULL;
++		l2cap_pi(sk)->amp_id = 0;
++		if (hci_chan_put(ampchan))
++			ampcon->l2cap_data = NULL;
++		else
+ 			l2cap_deaggregate(ampchan, l2cap_pi(sk));
+ 	}
+ 
+@@ -755,6 +755,7 @@
+ 
+ 			if (l2cap_pi(sk)->amp_pref ==
+ 					BT_AMP_POLICY_PREFER_AMP &&
++					enable_hs &&
+ 					conn->fc_mask & L2CAP_FC_A2MP)
+ 				amp_create_physical(conn, sk);
+ 			else
+@@ -863,6 +864,7 @@
+ 
+ 			if (l2cap_pi(sk)->amp_pref ==
+ 					BT_AMP_POLICY_PREFER_AMP &&
++					enable_hs &&
+ 					conn->fc_mask & L2CAP_FC_A2MP)
+ 				amp_create_physical(conn, sk);
+ 			else
+@@ -1278,8 +1280,9 @@
+ 		conn = hcon->l2cap_data;
+ 	} else {
+ 		if (l2cap_pi(sk)->dcid == L2CAP_CID_LE_DATA)
+-			hcon = hci_connect(hdev, LE_LINK, 0, dst,
+-					l2cap_pi(sk)->sec_level, auth_type);
++			hcon = hci_le_connect(hdev, 0, dst,
++					l2cap_pi(sk)->sec_level, auth_type,
++					&bt_sk(sk)->le_params);
+ 		else
+ 			hcon = hci_connect(hdev, ACL_LINK, 0, dst,
+ 					l2cap_pi(sk)->sec_level, auth_type);
+@@ -1309,7 +1312,17 @@
+ 		sk->sk_state_change(sk);
+ 	} else {
+ 		sk->sk_state = BT_CONNECT;
+-		l2cap_sock_set_timer(sk, sk->sk_sndtimeo);
++		/* If we have valid LE Params, let timeout override default */
++		if (l2cap_pi(sk)->dcid == L2CAP_CID_LE_DATA &&
++			l2cap_sock_le_params_valid(&bt_sk(sk)->le_params)) {
++			u16 timeout = bt_sk(sk)->le_params.conn_timeout;
++
++			if (timeout)
++				l2cap_sock_set_timer(sk,
++						msecs_to_jiffies(timeout*1000));
++		} else
++			l2cap_sock_set_timer(sk, sk->sk_sndtimeo);
++
+ 		sk->sk_state_change(sk);
+ 
+ 		if (hcon->state == BT_CONNECTED) {
+@@ -1980,10 +1993,10 @@
+ 				frames_to_ack = 0;
+ 		}
+ 
+-		/* Ack now if the tx window is 3/4ths full.
++		/* Ack now if the window is 3/4ths full.
+ 		 * Calculate without mul or div
+ 		 */
+-		threshold = pi->tx_win;
++		threshold = pi->ack_win;
+ 		threshold += threshold << 1;
+ 		threshold >>= 2;
+ 
+@@ -2713,7 +2726,7 @@
+ 	if (!l2cap_pi(sk)->conn)
+ 		return;
+ 
+-	if (!(l2cap_pi(sk)->conn->fc_mask & L2CAP_FC_A2MP))
++	if (!(l2cap_pi(sk)->conn->fc_mask & L2CAP_FC_A2MP) || !enable_hs)
+ 		return;
+ 
+ 	if (l2cap_pi(sk)->amp_id == 0) {
+@@ -3092,6 +3105,7 @@
+ 		pi->tx_win_max = L2CAP_TX_WIN_MAX_ENHANCED;
+ 		pi->extended_control = 0;
+ 	}
++	pi->ack_win = pi->tx_win;
+ }
+ 
+ static void l2cap_aggregate_fs(struct hci_ext_fs *cur,
+@@ -3187,8 +3201,9 @@
+ 	return 1;
+ }
+ 
+-static struct hci_chan *l2cap_chan_admit(u8 amp_id, struct l2cap_pinfo *pi)
++static struct hci_chan *l2cap_chan_admit(u8 amp_id, struct sock *sk)
+ {
++	struct l2cap_pinfo *pi = l2cap_pi(sk);
+ 	struct hci_dev *hdev;
+ 	struct hci_conn *hcon;
+ 	struct hci_chan *chan;
+@@ -3208,19 +3223,23 @@
+ 	chan = hci_chan_list_lookup_id(hdev, hcon->handle);
+ 	if (chan) {
+ 		l2cap_aggregate(chan, pi);
++		sock_hold(sk);
++		chan->l2cap_sk = sk;
++		hci_chan_hold(chan);
++		pi->ampchan = chan;
+ 		goto done;
+ 	}
+ 
+-	if (bt_sk(pi)->parent) {
+-		/* Incoming connection */
+-		chan = hci_chan_accept(hcon,
+-					(struct hci_ext_fs *) &pi->local_fs,
+-					(struct hci_ext_fs *) &pi->remote_fs);
+-	} else {
+-		/* Outgoing connection */
+-		chan = hci_chan_create(hcon,
+-					(struct hci_ext_fs *) &pi->local_fs,
+-					(struct hci_ext_fs *) &pi->remote_fs);
++	chan = hci_chan_add(hdev);
++	if (chan) {
++		chan->conn = hcon;
++		sock_hold(sk);
++		chan->l2cap_sk = sk;
++		hci_chan_hold(chan);
++		pi->ampchan = chan;
++		hci_chan_create(chan,
++			(struct hci_ext_fs *) &pi->local_fs,
++			(struct hci_ext_fs *) &pi->remote_fs);
+ 	}
+ done:
+ 	hci_dev_put(hdev);
+@@ -3272,7 +3291,7 @@
+ 	struct l2cap_conf_rfc rfc = { .mode = pi->mode };
+ 	void *ptr = req->data;
+ 
+-	BT_DBG("sk %p", sk);
++	BT_DBG("sk %p mode %d", sk, pi->mode);
+ 
+ 	if (pi->num_conf_req || pi->num_conf_rsp)
+ 		goto done;
+@@ -3298,7 +3317,6 @@
+ 		if (!(pi->conn->feat_mask & L2CAP_FEAT_ERTM) &&
+ 				!(pi->conn->feat_mask & L2CAP_FEAT_STREAMING))
+ 			break;
+-
+ 		rfc.txwin_size      = 0;
+ 		rfc.max_transmit    = 0;
+ 		rfc.retrans_timeout = 0;
+@@ -3350,6 +3368,7 @@
+ 		break;
+ 
+ 	case L2CAP_MODE_STREAMING:
++		l2cap_setup_txwin(pi);
+ 		rfc.txwin_size      = 0;
+ 		rfc.max_transmit    = 0;
+ 		rfc.retrans_timeout = 0;
+@@ -3447,6 +3466,9 @@
+ 
+ 	BT_DBG("sk %p", sk);
+ 
++	if (pi->omtu > mtu)
++		mtu = pi->omtu;
++
+ 	while (len >= L2CAP_CONF_OPT_SIZE) {
+ 		len -= l2cap_get_conf_opt(&req, &type, &olen, &val);
+ 
+@@ -3548,6 +3570,8 @@
+ 	if (pi->mode != rfc.mode) {
+ 		result = L2CAP_CONF_UNACCEPT;
+ 		rfc.mode = pi->mode;
++		if (mtu > L2CAP_DEFAULT_MTU)
++			pi->omtu = mtu;
+ 
+ 		if (pi->num_conf_rsp == 1)
+ 			return -ECONNREFUSED;
+@@ -3626,14 +3650,10 @@
+ 				struct hci_chan *chan;
+ 				/* Trigger logical link creation only on AMP */
+ 
+-				chan = l2cap_chan_admit(pi->amp_id, pi);
++				chan = l2cap_chan_admit(pi->amp_id, sk);
+ 				if (!chan)
+ 					return -ECONNREFUSED;
+ 
+-				hci_chan_hold(chan);
+-				pi->ampchan = chan;
+-				chan->l2cap_sk = sk;
+-
+ 				if (chan->state == BT_CONNECTED)
+ 					l2cap_create_cfm(chan, 0);
+ 			}
+@@ -3829,10 +3849,7 @@
+ 			break;
+ 
+ 		case L2CAP_CONF_EXT_WINDOW:
+-			pi->tx_win = val;
+-
+-			if (pi->tx_win > L2CAP_TX_WIN_MAX_ENHANCED)
+-				pi->tx_win = L2CAP_TX_WIN_MAX_ENHANCED;
++			pi->ack_win = min_t(u16, val, pi->ack_win);
+ 
+ 			l2cap_add_conf_opt(&ptr, L2CAP_CONF_EXT_WINDOW,
+ 					2, pi->tx_win);
+@@ -3854,6 +3871,10 @@
+ 			pi->retrans_timeout = le16_to_cpu(rfc.retrans_timeout);
+ 			pi->monitor_timeout = le16_to_cpu(rfc.monitor_timeout);
+ 			pi->mps    = le16_to_cpu(rfc.max_pdu_size);
++			if (!pi->extended_control) {
++				pi->ack_win = min_t(u16, pi->ack_win,
++						    rfc.txwin_size);
++			}
+ 			break;
+ 		case L2CAP_MODE_STREAMING:
+ 			pi->mps    = le16_to_cpu(rfc.max_pdu_size);
+@@ -3886,6 +3907,7 @@
+ 	int type, olen;
+ 	unsigned long val;
+ 	struct l2cap_conf_rfc rfc;
++	u16 txwin_ext = pi->ack_win;
+ 
+ 	BT_DBG("sk %p, rsp %p, len %d", sk, rsp, len);
+ 
+@@ -3894,6 +3916,7 @@
+ 	rfc.retrans_timeout = cpu_to_le16(L2CAP_DEFAULT_RETRANS_TO);
+ 	rfc.monitor_timeout = cpu_to_le16(L2CAP_DEFAULT_MONITOR_TO);
+ 	rfc.max_pdu_size = cpu_to_le16(L2CAP_DEFAULT_MAX_PDU_SIZE);
++	rfc.txwin_size = min_t(u16, pi->ack_win, L2CAP_DEFAULT_TX_WINDOW);
+ 
+ 	if ((pi->mode != L2CAP_MODE_ERTM) && (pi->mode != L2CAP_MODE_STREAMING))
+ 		return;
+@@ -3905,16 +3928,22 @@
+ 		case L2CAP_CONF_RFC:
+ 			if (olen == sizeof(rfc))
+ 				memcpy(&rfc, (void *)val, olen);
+-			goto done;
++			break;
++		case L2CAP_CONF_EXT_WINDOW:
++			txwin_ext = val;
++			break;
+ 		}
+ 	}
+ 
+-done:
+ 	switch (rfc.mode) {
+ 	case L2CAP_MODE_ERTM:
+ 		pi->retrans_timeout = le16_to_cpu(rfc.retrans_timeout);
+ 		pi->monitor_timeout = le16_to_cpu(rfc.monitor_timeout);
+ 		pi->mps    = le16_to_cpu(rfc.max_pdu_size);
++		if (pi->extended_control)
++			pi->ack_win = min_t(u16, pi->ack_win, txwin_ext);
++		else
++			pi->ack_win = min_t(u16, pi->ack_win, rfc.txwin_size);
+ 		break;
+ 	case L2CAP_MODE_STREAMING:
+ 		pi->mps    = le16_to_cpu(rfc.max_pdu_size);
+@@ -4467,17 +4496,13 @@
+ 			/* Already sent a 'pending' response, so set up
+ 			 * the logical link now
+ 			 */
+-			chan = l2cap_chan_admit(pi->amp_id, pi);
++			chan = l2cap_chan_admit(pi->amp_id, sk);
+ 			if (!chan) {
+ 				l2cap_send_disconn_req(pi->conn, sk,
+ 							ECONNRESET);
+ 				goto done;
+ 			}
+ 
+-			hci_chan_hold(chan);
+-			pi->ampchan = chan;
+-			chan->l2cap_sk = sk;
+-
+ 			if (chan->state == BT_CONNECTED)
+ 				l2cap_create_cfm(chan, 0);
+ 		}
+@@ -4646,10 +4671,14 @@
+ 					L2CAP_INFO_RSP, sizeof(buf), buf);
+ 	} else if (type == L2CAP_IT_FIXED_CHAN) {
+ 		u8 buf[12];
++		u8 fc_mask = l2cap_fc_mask;
+ 		struct l2cap_info_rsp *rsp = (struct l2cap_info_rsp *) buf;
+ 		rsp->type   = cpu_to_le16(L2CAP_IT_FIXED_CHAN);
+ 		rsp->result = cpu_to_le16(L2CAP_IR_SUCCESS);
+-		memcpy(buf + 4, l2cap_fixed_chan, 8);
++		if (enable_hs)
++			fc_mask |= L2CAP_FC_A2MP;
++		memset(rsp->data, 0, 8);
++		rsp->data[0] = fc_mask;
+ 		l2cap_send_cmd(conn, cmd->ident,
+ 					L2CAP_INFO_RSP, sizeof(buf), buf);
+ 	} else {
+@@ -4968,15 +4997,16 @@
+ 			 */
+ 			pi->amp_move_state =
+ 				L2CAP_AMP_STATE_WAIT_LOGICAL_CONFIRM;
+-		} else if (result == L2CAP_MOVE_CHAN_SUCCESS &&
+-			pi->amp_move_state ==
++		} else if (pi->amp_move_state ==
+ 				L2CAP_AMP_STATE_WAIT_MOVE_RSP_SUCCESS) {
+-			/* Logical link is up or moving to BR/EDR,
+-			 * proceed with move */
+-			if (pi->conn_state & L2CAP_CONN_LOCAL_BUSY) {
++			if (result == L2CAP_MOVE_CHAN_PENDING) {
++				break;
++			} else if (pi->conn_state & L2CAP_CONN_LOCAL_BUSY) {
+ 				pi->amp_move_state =
+ 					L2CAP_AMP_STATE_WAIT_LOCAL_BUSY;
+ 			} else {
++				/* Logical link is up or moving to BR/EDR,
++				 * proceed with move */
+ 				pi->amp_move_state =
+ 					L2CAP_AMP_STATE_WAIT_MOVE_CONFIRM_RSP;
+ 				l2cap_send_move_chan_cfm(conn, pi, pi->scid,
+@@ -5004,7 +5034,7 @@
+ 			}
+ 			pi->remote_fs = default_fs;
+ 			pi->local_fs = default_fs;
+-			chan = l2cap_chan_admit(pi->amp_move_id, pi);
++			chan = l2cap_chan_admit(pi->amp_move_id, sk);
+ 			if (!chan) {
+ 				/* Logical link not available */
+ 				l2cap_send_move_chan_cfm(conn, pi, pi->scid,
+@@ -5012,10 +5042,6 @@
+ 				break;
+ 			}
+ 
+-			hci_chan_hold(chan);
+-			pi->ampchan = chan;
+-			chan->l2cap_sk = sk;
+-
+ 			if (chan->state == BT_CONNECTED) {
+ 				/* Logical link is already ready to go */
+ 				pi->ampcon = chan->conn;
+@@ -5037,6 +5063,10 @@
+ 			}
+ 		} else {
+ 			/* Any other amp move state means the move failed. */
++			pi->amp_move_id = pi->amp_id;
++			pi->amp_move_state = L2CAP_AMP_STATE_STABLE;
++			l2cap_amp_move_revert(sk);
++			pi->amp_move_role = L2CAP_AMP_MOVE_NONE;
+ 			l2cap_send_move_chan_cfm(conn, pi, pi->scid,
+ 						L2CAP_MOVE_CHAN_UNCONFIRMED);
+ 			l2cap_sock_set_timer(sk, L2CAP_MOVE_TIMEOUT);
+@@ -5115,14 +5145,14 @@
+ 			pi->amp_id = pi->amp_move_id;
+ 			if (!pi->amp_id && pi->ampchan) {
+ 				struct hci_chan *ampchan = pi->ampchan;
++				struct hci_conn *ampcon = pi->ampcon;
+ 				/* Have moved off of AMP, free the channel */
+ 				pi->ampchan = NULL;
+-				if (pi->ampcon)
+-					pi->ampcon->l2cap_data = NULL;
+ 				pi->ampcon = NULL;
+-
+-				if (!hci_chan_put(ampchan))
+-					l2cap_deaggregate(pi->ampchan, pi);
++				if (hci_chan_put(ampchan))
++					ampcon->l2cap_data = NULL;
++				else
++					l2cap_deaggregate(ampchan, pi);
+ 			}
+ 			l2cap_amp_move_success(sk);
+ 		} else {
+@@ -5175,16 +5205,15 @@
+ 		pi->amp_move_state = L2CAP_AMP_STATE_STABLE;
+ 		pi->amp_id = pi->amp_move_id;
+ 
+-		if (!pi->amp_id) {
++		if (!pi->amp_id && pi->ampchan) {
+ 			struct hci_chan *ampchan = pi->ampchan;
+-
++			struct hci_conn *ampcon = pi->ampcon;
+ 			/* Have moved off of AMP, free the channel */
+ 			pi->ampchan = NULL;
+-			if (pi->ampcon)
+-				pi->ampcon->l2cap_data = NULL;
+ 			pi->ampcon = NULL;
+-
+-			if (ampchan && !hci_chan_put(ampchan))
++			if (hci_chan_put(ampchan))
++				ampcon->l2cap_data = NULL;
++			else
+ 				l2cap_deaggregate(ampchan, pi);
+ 		}
+ 
+@@ -5320,12 +5349,8 @@
+ 				0xFFFFFFFF, 0xFFFFFFFF, 0xFFFFFFFF};
+ 		pi->remote_fs = default_fs;
+ 		pi->local_fs = default_fs;
+-		chan = l2cap_chan_admit(local_id, pi);
++		chan = l2cap_chan_admit(local_id, sk);
+ 		if (chan) {
+-			hci_chan_hold(chan);
+-			pi->ampchan = chan;
+-			chan->l2cap_sk = sk;
+-
+ 			if (chan->state == BT_CONNECTED) {
+ 				/* Logical link is ready to go */
+ 				pi->ampcon = chan->conn;
+@@ -5379,11 +5404,12 @@
+ 	release_sock(sk);
+ }
+ 
+-int l2cap_logical_link_complete(struct hci_chan *chan, u8 status)
++static void l2cap_logical_link_complete(struct hci_chan *chan, u8 status)
+ {
+ 	struct l2cap_pinfo *pi;
+ 	struct sock *sk;
+ 	struct hci_chan *ampchan;
++	struct hci_conn *ampcon;
+ 
+ 	BT_DBG("status %d, chan %p, conn %p", (int) status, chan, chan->conn);
+ 
+@@ -5396,7 +5422,7 @@
+ 
+ 	if (sk->sk_state != BT_CONNECTED && !l2cap_pi(sk)->amp_id) {
+ 		release_sock(sk);
+-		return 0;
++		return;
+ 	}
+ 
+ 	pi = l2cap_pi(sk);
+@@ -5405,6 +5431,8 @@
+ 		pi->ampcon = chan->conn;
+ 		pi->ampcon->l2cap_data = pi->conn;
+ 
++		BT_DBG("amp_move_state %d", pi->amp_move_state);
++
+ 		if (sk->sk_state != BT_CONNECTED) {
+ 			struct l2cap_conf_rsp rsp;
+ 
+@@ -5456,19 +5484,24 @@
+ 					pi->amp_move_cmd_ident, pi->dcid,
+ 					L2CAP_MOVE_CHAN_SUCCESS);
+ 			}
+-		} else {
++		} else if ((pi->amp_move_state !=
++				L2CAP_AMP_STATE_WAIT_MOVE_RSP_SUCCESS) &&
++			(pi->amp_move_state !=
++				L2CAP_AMP_STATE_WAIT_MOVE_CONFIRM) &&
++			(pi->amp_move_state !=
++				L2CAP_AMP_STATE_WAIT_MOVE_CONFIRM_RSP)) {
++			/* Move was not in expected state, free the channel */
+ 			ampchan = pi->ampchan;
+-
+-			/* Move was not in expected state, free the
+-			 * logical link
+-			 */
++			ampcon = pi->ampcon;
+ 			pi->ampchan = NULL;
+-			if (pi->ampcon)
+-				pi->ampcon->l2cap_data = NULL;
+ 			pi->ampcon = NULL;
+-
+-			if (ampchan && !hci_chan_put(ampchan))
+-				l2cap_deaggregate(ampchan, pi);
++			if (ampchan) {
++				if (hci_chan_put(ampchan))
++					ampcon->l2cap_data = NULL;
++				else
++					l2cap_deaggregate(ampchan, pi);
++			}
++			pi->amp_move_state = L2CAP_AMP_STATE_STABLE;
+ 		}
+ 	} else {
+ 		/* Logical link setup failed. */
+@@ -5503,20 +5536,19 @@
+ 						L2CAP_MOVE_CHAN_UNCONFIRMED);
+ 			l2cap_sock_set_timer(sk, L2CAP_MOVE_TIMEOUT);
+ 		}
+-
+ 		ampchan = pi->ampchan;
+-
++		ampcon = pi->ampcon;
+ 		pi->ampchan = NULL;
+-		if (pi->ampcon)
+-			pi->ampcon->l2cap_data = NULL;
+ 		pi->ampcon = NULL;
+-
+-		if (ampchan && !hci_chan_put(ampchan))
+-			l2cap_deaggregate(ampchan, pi);
++		if (ampchan) {
++			if (hci_chan_put(ampchan))
++				ampcon->l2cap_data = NULL;
++			else
++				l2cap_deaggregate(ampchan, pi);
++		}
+ 	}
+ 
+ 	release_sock(sk);
+-	return 0;
+ }
+ 
+ static void l2cap_logical_link_worker(struct work_struct *work)
+@@ -5525,8 +5557,11 @@
+ 		container_of(work, struct l2cap_logical_link_work, work);
+ 	struct sock *sk = log_link_work->chan->l2cap_sk;
+ 
+-	l2cap_logical_link_complete(log_link_work->chan, log_link_work->status);
+-	sock_put(sk);
++	if (sk) {
++		l2cap_logical_link_complete(log_link_work->chan,
++							log_link_work->status);
++		sock_put(sk);
++	}
+ 	hci_chan_put(log_link_work->chan);
+ 	kfree(log_link_work);
+ }
+@@ -5535,9 +5570,7 @@
+ {
+ 	struct l2cap_logical_link_work *amp_work;
+ 
+-	if (chan->l2cap_sk) {
+-		sock_hold(chan->l2cap_sk);
+-	} else {
++	if (!chan->l2cap_sk) {
+ 		BT_ERR("Expected l2cap_sk to point to connecting socket");
+ 		return -EFAULT;
+ 	}
+@@ -5593,15 +5626,13 @@
+ 		bh_lock_sock(sk);
+ 		/* TODO MM/PK - What to do if connection is LOCAL_BUSY?  */
+ 		if (l2cap_pi(sk)->ampchan == chan) {
+-			struct hci_chan *ampchan = l2cap_pi(sk)->ampchan;
+-
++			struct hci_conn *ampcon = l2cap_pi(sk)->ampcon;
+ 			l2cap_pi(sk)->ampchan = NULL;
+-			if (l2cap_pi(sk)->ampcon)
+-				l2cap_pi(sk)->ampcon->l2cap_data = NULL;
+ 			l2cap_pi(sk)->ampcon = NULL;
+-
+-			if (ampchan && !hci_chan_put(ampchan))
+-				l2cap_deaggregate(ampchan, l2cap_pi(sk));
++			if (hci_chan_put(chan))
++				ampcon->l2cap_data = NULL;
++			else
++				l2cap_deaggregate(chan, l2cap_pi(sk));
+ 
+ 			l2cap_amp_move_init(sk);
+ 		}
+@@ -5670,7 +5701,8 @@
+ 	struct hci_conn *hcon = conn->hcon;
+ 	struct l2cap_conn_param_update_req *req;
+ 	struct l2cap_conn_param_update_rsp rsp;
+-	u16 min, max, latency, to_multiplier, cmd_len;
++	struct sock *sk;
++	u16 min, max, latency, timeout, cmd_len;
+ 	int err;
+ 
+ 	if (!(hcon->link_mode & HCI_LM_MASTER))
+@@ -5680,28 +5712,32 @@
+ 	if (cmd_len != sizeof(struct l2cap_conn_param_update_req))
+ 		return -EPROTO;
+ 
+-	req = (struct l2cap_conn_param_update_req *) data;
+-	min		= __le16_to_cpu(req->min);
+-	max		= __le16_to_cpu(req->max);
+-	latency		= __le16_to_cpu(req->latency);
+-	to_multiplier	= __le16_to_cpu(req->to_multiplier);
++	memset(&rsp, 0, sizeof(rsp));
++	rsp.result = cpu_to_le16(L2CAP_CONN_PARAM_REJECTED);
+ 
+-	BT_DBG("min 0x%4.4x max 0x%4.4x latency: 0x%4.4x Timeout: 0x%4.4x",
+-						min, max, latency, to_multiplier);
++	sk = l2cap_find_sock_by_fixed_cid_and_dir(4, conn->src, conn->dst, 0);
+ 
+-	memset(&rsp, 0, sizeof(rsp));
++	if (sk && !bt_sk(sk)->le_params.prohibit_remote_chg) {
++		req = (struct l2cap_conn_param_update_req *) data;
++		min = __le16_to_cpu(req->min);
++		max = __le16_to_cpu(req->max);
++		latency = __le16_to_cpu(req->latency);
++		timeout = __le16_to_cpu(req->to_multiplier);
+ 
+-	err = l2cap_check_conn_param(min, max, latency, to_multiplier);
+-	if (err)
+-		rsp.result = cpu_to_le16(L2CAP_CONN_PARAM_REJECTED);
+-	else
+-		rsp.result = cpu_to_le16(L2CAP_CONN_PARAM_ACCEPTED);
++		err = l2cap_check_conn_param(min, max, latency, timeout);
++		if (!err) {
++			rsp.result = cpu_to_le16(L2CAP_CONN_PARAM_ACCEPTED);
++			hci_le_conn_update(hcon, min, max, latency, timeout);
++			bt_sk(sk)->le_params.interval_min = min;
++			bt_sk(sk)->le_params.interval_max = max;
++			bt_sk(sk)->le_params.latency = latency;
++			bt_sk(sk)->le_params.supervision_timeout = timeout;
++		}
++	}
+ 
+ 	l2cap_send_cmd(conn, cmd->ident, L2CAP_CONN_PARAM_UPDATE_RSP,
+ 							sizeof(rsp), &rsp);
+ 
+-	if (!err)
+-		hci_le_conn_update(hcon, min, max, latency, to_multiplier);
+ 
+ 	return 0;
+ }
+@@ -7227,14 +7263,31 @@
+ static inline int l2cap_att_channel(struct l2cap_conn *conn, __le16 cid,
+ 							struct sk_buff *skb)
+ {
+-	struct sock *sk;
++	struct sock *sk = NULL;
+ 	struct sk_buff *skb_rsp;
+ 	struct l2cap_hdr *lh;
+ 	int dir;
+-	u8 mtu_rsp[] = {L2CAP_ATT_MTU_RSP, 23, 0};
+ 	u8 err_rsp[] = {L2CAP_ATT_ERROR, 0x00, 0x00, 0x00,
+ 						L2CAP_ATT_NOT_SUPPORTED};
+ 
++	if (skb->data[0] == L2CAP_ATT_MTU_REQ) {
++		u8 mtu_rsp[] = {L2CAP_ATT_MTU_RSP, 23, 0};
++
++		skb_rsp = bt_skb_alloc(sizeof(mtu_rsp) + L2CAP_HDR_SIZE,
++								GFP_ATOMIC);
++		if (!skb_rsp)
++			goto drop;
++
++		lh = (struct l2cap_hdr *) skb_put(skb_rsp, L2CAP_HDR_SIZE);
++		lh->len = cpu_to_le16(sizeof(mtu_rsp));
++		lh->cid = cpu_to_le16(L2CAP_CID_LE_DATA);
++		memcpy(skb_put(skb_rsp, sizeof(mtu_rsp)), mtu_rsp,
++							sizeof(mtu_rsp));
++		hci_send_acl(conn->hcon, NULL, skb_rsp, 0);
++
++		goto free_skb;
++	}
++
+ 	dir = (skb->data[0] & L2CAP_ATT_RESPONSE_BIT) ? 0 : 1;
+ 
+ 	sk = l2cap_find_sock_by_fixed_cid_and_dir(cid, conn->src,
+@@ -7255,28 +7308,30 @@
+ 	if (l2cap_pi(sk)->imtu < skb->len)
+ 		goto drop;
+ 
+-	if (skb->data[0] == L2CAP_ATT_MTU_REQ) {
+-		skb_rsp = bt_skb_alloc(sizeof(mtu_rsp) + L2CAP_HDR_SIZE,
+-								GFP_ATOMIC);
+-		if (!skb_rsp)
+-			goto drop;
++	if (!sock_queue_rcv_skb(sk, skb))
++		goto done;
+ 
+-		lh = (struct l2cap_hdr *) skb_put(skb_rsp, L2CAP_HDR_SIZE);
+-		lh->len = cpu_to_le16(sizeof(mtu_rsp));
+-		lh->cid = cpu_to_le16(L2CAP_CID_LE_DATA);
+-		memcpy(skb_put(skb_rsp, sizeof(mtu_rsp)), mtu_rsp,
+-							sizeof(mtu_rsp));
+-		hci_send_acl(conn->hcon, NULL, skb_rsp, 0);
++drop:
++	if (skb->data[0] != L2CAP_ATT_INDICATE)
++		goto not_indicate;
++
++	/* If this is an incoming Indication, we are required to confirm */
+ 
++	skb_rsp = bt_skb_alloc(sizeof(u8) + L2CAP_HDR_SIZE, GFP_ATOMIC);
++	if (!skb_rsp)
+ 		goto free_skb;
+-	}
+ 
+-	if (!sock_queue_rcv_skb(sk, skb))
+-		goto done;
++	lh = (struct l2cap_hdr *) skb_put(skb_rsp, L2CAP_HDR_SIZE);
++	lh->len = cpu_to_le16(sizeof(u8));
++	lh->cid = cpu_to_le16(L2CAP_CID_LE_DATA);
++	err_rsp[0] = L2CAP_ATT_CONFIRM;
++	memcpy(skb_put(skb_rsp, sizeof(u8)), err_rsp, sizeof(u8));
++	hci_send_acl(conn->hcon, NULL, skb_rsp, 0);
++	goto free_skb;
+ 
+-drop:
+-	if (skb->data[0] & L2CAP_ATT_RESPONSE_BIT &&
+-			skb->data[0] != L2CAP_ATT_INDICATE)
++not_indicate:
++	if (skb->data[0] & L2CAP_ATT_RESPONSE_BIT ||
++			skb->data[0] == L2CAP_ATT_CONFIRM)
+ 		goto free_skb;
+ 
+ 	/* If this is an incoming PDU that requires a response, respond with
+@@ -7352,9 +7407,9 @@
+ 				l2cap_data_channel(sk, skb);
+ 
+ 			bh_unlock_sock(sk);
+-		} else if (cid == L2CAP_CID_A2MP) {
++		} else if ((cid == L2CAP_CID_A2MP) && enable_hs) {
+ 			BT_DBG("A2MP");
+-			amp_conn_ind(conn, skb);
++			amp_conn_ind(conn->hcon, skb);
+ 		} else {
+ 			BT_DBG("unknown cid 0x%4.4x", cid);
+ 			kfree_skb(skb);
+@@ -7507,8 +7562,9 @@
+ 			if (!status) {
+ 				l2cap_pi(sk)->conf_state |=
+ 						L2CAP_CONF_CONNECT_PEND;
+-				if (l2cap_pi(sk)->amp_pref ==
+-						BT_AMP_POLICY_PREFER_AMP) {
++				if ((l2cap_pi(sk)->amp_pref ==
++						BT_AMP_POLICY_PREFER_AMP) &&
++						enable_hs) {
+ 					amp_create_physical(l2cap_pi(sk)->conn,
+ 								sk);
+ 				} else
+@@ -7543,6 +7599,17 @@
+ 			rsp.status = cpu_to_le16(L2CAP_CS_NO_INFO);
+ 			l2cap_send_cmd(conn, l2cap_pi(sk)->ident,
+ 					L2CAP_CONN_RSP, sizeof(rsp), &rsp);
++
++			if (!(l2cap_pi(sk)->conf_state & L2CAP_CONF_REQ_SENT) &&
++				result == L2CAP_CR_SUCCESS) {
++				char buf[128];
++				l2cap_pi(sk)->conf_state |= L2CAP_CONF_REQ_SENT;
++				l2cap_send_cmd(conn, l2cap_get_ident(conn),
++					       L2CAP_CONF_REQ,
++					       l2cap_build_conf_req(sk, buf),
++					       buf);
++				l2cap_pi(sk)->num_conf_req++;
++			}
+ 		}
+ 
+ 		bh_unlock_sock(sk);
+@@ -7799,5 +7866,8 @@
+ module_param(disable_ertm, bool, 0644);
+ MODULE_PARM_DESC(disable_ertm, "Disable enhanced retransmission mode");
+ 
++module_param(enable_hs, bool, 0644);
++MODULE_PARM_DESC(enable_hs, "Enable A2MP protocol");
++
+ module_param(enable_reconfig, bool, 0644);
+ MODULE_PARM_DESC(enable_reconfig, "Enable reconfig after initiating AMP move");
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/l2cap_sock.c android_kernel_htc_primoc.new/net/bluetooth/l2cap_sock.c
+--- android_kernel_htc_primoc/net/bluetooth/l2cap_sock.c	2012-10-30 01:04:39.343141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/l2cap_sock.c	2012-10-30 01:04:10.574128213 +0100
+@@ -26,6 +26,9 @@
+ 
+ /* Bluetooth L2CAP sockets. */
+ 
++#include <linux/interrupt.h>
++#include <linux/module.h>
++
+ #include <net/bluetooth/bluetooth.h>
+ #include <net/bluetooth/hci_core.h>
+ #include <net/bluetooth/l2cap.h>
+@@ -78,6 +81,23 @@
+ 	sk_stop_timer(sk, &sk->sk_timer);
+ }
+ 
++int l2cap_sock_le_params_valid(struct bt_le_params *le_params)
++{
++	if (!le_params || le_params->latency > BT_LE_LATENCY_MAX ||
++			le_params->scan_window > BT_LE_SCAN_WINDOW_MAX ||
++			le_params->scan_interval < BT_LE_SCAN_INTERVAL_MIN ||
++			le_params->scan_window > le_params->scan_interval ||
++			le_params->interval_min < BT_LE_CONN_INTERVAL_MIN ||
++			le_params->interval_max > BT_LE_CONN_INTERVAL_MAX ||
++			le_params->interval_min > le_params->interval_max ||
++			le_params->supervision_timeout < BT_LE_SUP_TO_MIN ||
++			le_params->supervision_timeout > BT_LE_SUP_TO_MAX) {
++		return 0;
++	}
++
++	return 1;
++}
++
+ static struct sock *__l2cap_get_sock_by_addr(__le16 psm, bdaddr_t *src)
+ {
+ 	struct sock *sk;
+@@ -505,8 +525,10 @@
+ 		memset(&sec, 0, sizeof(sec));
+ 		sec.level = l2cap_pi(sk)->sec_level;
+ 
+-		if (sk->sk_state == BT_CONNECTED)
++		if (sk->sk_state == BT_CONNECTED) {
+ 			sec.key_size = l2cap_pi(sk)->conn->hcon->enc_key_size;
++			sec.level = l2cap_pi(sk)->conn->hcon->sec_level;
++		}
+ 
+ 		len = min_t(unsigned int, len, sizeof(sec));
+ 		if (copy_to_user(optval, (char *) &sec, len))
+@@ -545,6 +567,17 @@
+ 			err = -EFAULT;
+ 		break;
+ 
++	case BT_LE_PARAMS:
++		if (l2cap_pi(sk)->scid != L2CAP_CID_LE_DATA) {
++			err = -EINVAL;
++			break;
++		}
++
++		if (copy_to_user(optval, (char *) &bt_sk(sk)->le_params,
++						sizeof(bt_sk(sk)->le_params)))
++			err = -EFAULT;
++		break;
++
+ 	default:
+ 		err = -ENOPROTOOPT;
+ 		break;
+@@ -669,6 +702,7 @@
+ 	struct sock *sk = sock->sk;
+ 	struct bt_security sec;
+ 	struct bt_power pwr;
++	struct bt_le_params le_params;
+ 	struct l2cap_conn *conn;
+ 	int len, err = 0;
+ 	u32 opt;
+@@ -784,6 +818,41 @@
+ 
+ 		break;
+ 
++	case BT_LE_PARAMS:
++		if (l2cap_pi(sk)->scid != L2CAP_CID_LE_DATA) {
++			err = -EINVAL;
++			break;
++		}
++
++		if (copy_from_user((char *) &le_params, optval,
++					sizeof(struct bt_le_params))) {
++			err = -EFAULT;
++			break;
++		}
++
++		conn = l2cap_pi(sk)->conn;
++		if (!conn || !conn->hcon ||
++				l2cap_pi(sk)->scid != L2CAP_CID_LE_DATA) {
++			memcpy(&bt_sk(sk)->le_params, &le_params,
++							sizeof(le_params));
++			break;
++		}
++
++		if (!conn->hcon->out ||
++				!l2cap_sock_le_params_valid(&le_params)) {
++			err = -EINVAL;
++			break;
++		}
++
++		memcpy(&bt_sk(sk)->le_params, &le_params, sizeof(le_params));
++
++		hci_le_conn_update(conn->hcon,
++				le_params.interval_min,
++				le_params.interval_max,
++				le_params.latency,
++				le_params.supervision_timeout);
++		break;
++
+ 	default:
+ 		err = -ENOPROTOOPT;
+ 		break;
+@@ -1105,7 +1174,7 @@
+ static int l2cap_sock_release(struct socket *sock)
+ {
+ 	struct sock *sk = sock->sk;
+-	struct sock *srv_sk = NULL;
++	struct sock *sk2 = NULL;
+ 	int err;
+ 
+ 	BT_DBG("sock %p, sk %p", sock, sk);
+@@ -1113,15 +1182,16 @@
+ 	if (!sk)
+ 		return 0;
+ 
+-	/* If this is an ATT Client socket, find the matching Server */
+-	if (l2cap_pi(sk)->scid == L2CAP_CID_LE_DATA && !l2cap_pi(sk)->incoming)
+-		srv_sk = l2cap_find_sock_by_fixed_cid_and_dir(L2CAP_CID_LE_DATA,
+-					&bt_sk(sk)->src, &bt_sk(sk)->dst, 1);
+-
+-	/* If server socket found, request tear down */
+-	BT_DBG("client:%p server:%p", sk, srv_sk);
+-	if (srv_sk)
+-		l2cap_sock_set_timer(srv_sk, 1);
++	/* If this is an ATT socket, find it's matching server/client */
++	if (l2cap_pi(sk)->scid == L2CAP_CID_LE_DATA)
++		sk2 = l2cap_find_sock_by_fixed_cid_and_dir(L2CAP_CID_LE_DATA,
++					&bt_sk(sk)->src, &bt_sk(sk)->dst,
++					l2cap_pi(sk)->incoming ? 0 : 1);
++
++	/* If matching socket found, request tear down */
++	BT_DBG("sock:%p companion:%p", sk, sk2);
++	if (sk2)
++		l2cap_sock_set_timer(sk2, 1);
+ 
+ 	err = l2cap_sock_shutdown(sock, 2);
+ 
+@@ -1201,6 +1271,7 @@
+ 	pi->scid = 0;
+ 	pi->dcid = 0;
+ 	pi->tx_win_max = L2CAP_TX_WIN_MAX_ENHANCED;
++	pi->ack_win = pi->tx_win;
+ 	pi->extended_control = 0;
+ 
+ 	pi->local_conf.fcs = pi->fcs;
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/Makefile android_kernel_htc_primoc.new/net/bluetooth/Makefile
+--- android_kernel_htc_primoc/net/bluetooth/Makefile	2012-10-30 01:04:39.340141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/Makefile	2012-10-30 01:04:10.574128213 +0100
+@@ -9,6 +9,6 @@
+ obj-$(CONFIG_BT_HIDP)	+= hidp/
+ obj-$(CONFIG_BT_HID_BRCM)	+= hidbrcm/
+ 
+-bluetooth-y := af_bluetooth.o hci_core.o hci_conn.o hci_event.o mgmt.o hci_sock.o hci_sysfs.o lib.o smp.o
+-bluetooth-$(CONFIG_BT_L2CAP)	+= l2cap_core.o l2cap_sock.o amp.o
+-bluetooth-$(CONFIG_BT_SCO)	+= sco.o
++bluetooth-y := af_bluetooth.o hci_core.o hci_conn.o hci_event.o mgmt.o \
++	hci_sock.o hci_sysfs.o l2cap_core.o l2cap_sock.o smp.o sco.o lib.o \
++	amp.o
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/mgmt.c android_kernel_htc_primoc.new/net/bluetooth/mgmt.c
+--- android_kernel_htc_primoc/net/bluetooth/mgmt.c	2012-10-30 01:04:39.343141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/mgmt.c	2012-10-30 01:04:10.576128213 +0100
+@@ -24,6 +24,8 @@
+ /* Bluetooth HCI Management interface */
+ 
+ #include <linux/uaccess.h>
++#include <linux/interrupt.h>
++#include <linux/module.h>
+ #include <asm/unaligned.h>
+ 
+ #include <net/bluetooth/bluetooth.h>
+@@ -308,7 +310,7 @@
+ 
+ 		cmd = list_entry(p, struct pending_cmd, list);
+ 
+-		if (cmd->opcode != opcode)
++		if (opcode > 0 && cmd->opcode != opcode)
+ 			continue;
+ 
+ 		if (index >= 0 && cmd->index != index)
+@@ -416,6 +418,7 @@
+ static int update_class(struct hci_dev *hdev)
+ {
+ 	u8 cod[3];
++	int err = 0;
+ 
+ 	BT_DBG("%s", hdev->name);
+ 
+@@ -429,7 +432,12 @@
+ 	if (memcmp(cod, hdev->dev_class, 3) == 0)
+ 		return 0;
+ 
+-	return hci_send_cmd(hdev, HCI_OP_WRITE_CLASS_OF_DEV, sizeof(cod), cod);
++	err =  hci_send_cmd(hdev, HCI_OP_WRITE_CLASS_OF_DEV, sizeof(cod), cod);
++
++	if (err == 0)
++		memcpy(hdev->dev_class, cod, 3);
++
++	return err;
+ }
+ 
+ static int set_limited_discoverable(struct sock *sk, u16 index,
+@@ -998,12 +1006,12 @@
+ 	hdev->major_class |= cp->major & MGMT_MAJOR_CLASS_MASK;
+ 	hdev->minor_class = cp->minor;
+ 
+-	if (test_bit(HCI_UP, &hdev->flags))
++	if (test_bit(HCI_UP, &hdev->flags)) {
+ 		err = update_class(hdev);
+-	else
+-		err = 0;
+-
+-	if (err == 0)
++		if (err == 0)
++			err = cmd_complete(sk, index,
++		MGMT_OP_SET_DEV_CLASS, hdev->dev_class, sizeof(u8)*3);
++	} else
+ 		err = cmd_complete(sk, index, MGMT_OP_SET_DEV_CLASS, NULL, 0);
+ 
+ 	hci_dev_unlock_bh(hdev);
+@@ -1353,20 +1361,23 @@
+ 	if (!hdev)
+ 		return cmd_status(sk, index, MGMT_OP_ENCRYPT_LINK, ENODEV);
+ 
+-	hci_dev_lock(hdev);
++	hci_dev_lock_bh(hdev);
+ 
+ 	if (!test_bit(HCI_UP, &hdev->flags)) {
+ 		err = cmd_status(sk, index, MGMT_OP_ENCRYPT_LINK, ENETDOWN);
+-		goto failed;
++		goto done;
+ 	}
+ 
+-	conn = hci_conn_hash_lookup_ba(hdev, ACL_LINK,
+-					&cp->bdaddr);
+-	if (!conn)
+-		return cmd_status(sk, index, MGMT_OP_ENCRYPT_LINK, ENOTCONN);
++	conn = hci_conn_hash_lookup_ba(hdev, ACL_LINK, &cp->bdaddr);
++	if (!conn) {
++		err = cmd_status(sk, index, MGMT_OP_ENCRYPT_LINK, ENOTCONN);
++		goto done;
++	}
+ 
+-	if (test_and_set_bit(HCI_CONN_ENCRYPT_PEND, &conn->pend))
+-		return cmd_status(sk, index, MGMT_OP_ENCRYPT_LINK, EINPROGRESS);
++	if (test_and_set_bit(HCI_CONN_ENCRYPT_PEND, &conn->pend)) {
++		err = cmd_status(sk, index, MGMT_OP_ENCRYPT_LINK, EINPROGRESS);
++		goto done;
++	}
+ 
+ 	if (conn->link_mode & HCI_LM_AUTH) {
+ 		enc.handle = cpu_to_le16(conn->handle);
+@@ -1383,8 +1394,8 @@
+ 		}
+ 	}
+ 
+-failed:
+-	hci_dev_unlock(hdev);
++done:
++	hci_dev_unlock_bh(hdev);
+ 	hci_dev_put(hdev);
+ 
+ 	return err;
+@@ -1613,20 +1624,15 @@
+ 
+ 	hci_dev_lock_bh(hdev);
+ 
+-	BT_DBG("SSP Cap is %d", cp->ssp_cap);
+ 	io_cap = cp->io_cap;
+-	if ((cp->ssp_cap == 0) || (io_cap == 0x03)) {
+-		sec_level = BT_SECURITY_MEDIUM;
+-		auth_type = HCI_AT_DEDICATED_BONDING;
+-	} else {
+-		sec_level = BT_SECURITY_HIGH;
+-		auth_type = HCI_AT_DEDICATED_BONDING_MITM;
+-	}
++
++	sec_level = BT_SECURITY_MEDIUM;
++	auth_type = HCI_AT_DEDICATED_BONDING;
+ 
+ 	entry = hci_find_adv_entry(hdev, &cp->bdaddr);
+ 	if (entry && entry->flags & 0x04) {
+-		conn = hci_connect(hdev, LE_LINK, 0, &cp->bdaddr, sec_level,
+-								auth_type);
++		conn = hci_le_connect(hdev, 0, &cp->bdaddr, sec_level,
++							auth_type, NULL);
+ 	} else {
+ 		/* ACL-SSP does not support io_cap 0x04 (KeyboadDisplay) */
+ 		if (io_cap == 0x04)
+@@ -1811,6 +1817,81 @@
+ 	return err;
+ }
+ 
++static int set_rssi_reporter(struct sock *sk, u16 index,
++				unsigned char *data, u16 len)
++{
++	struct mgmt_cp_set_rssi_reporter *cp = (void *) data;
++	struct hci_dev *hdev;
++	struct hci_conn *conn;
++	int err = 0;
++
++	if (len != sizeof(*cp))
++		return cmd_status(sk, index, MGMT_OP_SET_RSSI_REPORTER,
++								EINVAL);
++
++	hdev = hci_dev_get(index);
++	if (!hdev)
++		return cmd_status(sk, index, MGMT_OP_SET_RSSI_REPORTER,
++							ENODEV);
++
++	hci_dev_lock_bh(hdev);
++
++	conn = hci_conn_hash_lookup_ba(hdev, LE_LINK, &cp->bdaddr);
++
++	if (!conn) {
++		err = cmd_status(sk, index, MGMT_OP_SET_RSSI_REPORTER,
++						ENOTCONN);
++		goto failed;
++	}
++
++	BT_DBG("updateOnThreshExceed %d ", cp->updateOnThreshExceed);
++	hci_conn_set_rssi_reporter(conn, cp->rssi_threshold,
++			__le16_to_cpu(cp->interval), cp->updateOnThreshExceed);
++
++failed:
++	hci_dev_unlock_bh(hdev);
++	hci_dev_put(hdev);
++
++	return err;
++}
++
++static int unset_rssi_reporter(struct sock *sk, u16 index,
++			unsigned char *data, u16 len)
++{
++	struct mgmt_cp_unset_rssi_reporter *cp = (void *) data;
++	struct hci_dev *hdev;
++	struct hci_conn *conn;
++	int err = 0;
++
++	if (len != sizeof(*cp))
++		return cmd_status(sk, index, MGMT_OP_UNSET_RSSI_REPORTER,
++					EINVAL);
++
++	hdev = hci_dev_get(index);
++
++	if (!hdev)
++		return cmd_status(sk, index, MGMT_OP_UNSET_RSSI_REPORTER,
++					ENODEV);
++
++	hci_dev_lock_bh(hdev);
++
++	conn = hci_conn_hash_lookup_ba(hdev, LE_LINK, &cp->bdaddr);
++
++	if (!conn) {
++		err = cmd_status(sk, index, MGMT_OP_UNSET_RSSI_REPORTER,
++					ENOTCONN);
++		goto failed;
++	}
++
++	hci_conn_unset_rssi_reporter(conn);
++
++failed:
++	hci_dev_unlock_bh(hdev);
++	hci_dev_put(hdev);
++
++	return err;
++}
++
+ static int set_local_name(struct sock *sk, u16 index, unsigned char *data,
+ 								u16 len)
+ {
+@@ -1915,10 +1996,7 @@
+ 						sizeof(le_cp), &le_cp);
+ 		if (err >= 0) {
+ 			mod_timer(&hdev->disco_le_timer, jiffies +
+-			//	msecs_to_jiffies(hdev->disco_int_phase * 1000));
+-                        //htc_bt ++
+-                                msecs_to_jiffies(1000));
+-                        //htc_bt --
++				msecs_to_jiffies(hdev->disco_int_phase * 1000));
+ 			hdev->disco_state = SCAN_LE;
+ 		} else
+ 			hdev->disco_state = SCAN_IDLE;
+@@ -2059,9 +2137,10 @@
+ 
+ 	err = hci_send_cmd(hdev, HCI_OP_INQUIRY, sizeof(cp), &cp);
+ 
+-	if (err < 0)
++	if (err < 0) {
+ 		mgmt_pending_remove(cmd);
+-	else if (lmp_le_capable(hdev)) {
++		hdev->disco_state = SCAN_IDLE;
++	} else if (lmp_le_capable(hdev)) {
+ 		cmd = mgmt_pending_find(MGMT_OP_STOP_DISCOVERY, index);
+ 		if (!cmd)
+ 			mgmt_pending_add(sk, MGMT_OP_STOP_DISCOVERY, index,
+@@ -2073,7 +2152,8 @@
+ 		del_timer(&hdev->disco_timer);
+ 		mod_timer(&hdev->disco_timer,
+ 				jiffies + msecs_to_jiffies(20000));
+-	}
++	} else
++		hdev->disco_state = SCAN_BR;
+ 
+ failed:
+ 	hci_dev_unlock_bh(hdev);
+@@ -2117,9 +2197,7 @@
+ 			err = cmd_complete(sk, index, MGMT_OP_STOP_DISCOVERY,
+ 								NULL, 0);
+ 		}
+-	}
+-
+-	if (err < 0)
++	} else if (state == SCAN_BR)
+ 		err = hci_send_cmd(hdev, HCI_OP_INQUIRY_CANCEL, 0, NULL);
+ 
+ 	cmd = mgmt_pending_find(MGMT_OP_STOP_DISCOVERY, index);
+@@ -2369,6 +2447,12 @@
+ 	case MGMT_OP_SET_CONNECTION_PARAMS:
+ 		err = set_connection_params(sk, index, buf + sizeof(*hdr), len);
+ 		break;
++	case MGMT_OP_SET_RSSI_REPORTER:
++		err = set_rssi_reporter(sk, index, buf + sizeof(*hdr), len);
++		break;
++	case MGMT_OP_UNSET_RSSI_REPORTER:
++		err = unset_rssi_reporter(sk, index, buf + sizeof(*hdr), len);
++		break;
+ 	case MGMT_OP_READ_LOCAL_OOB_DATA:
+ 		err = read_local_oob_data(sk, index);
+ 		break;
+@@ -2399,6 +2483,14 @@
+ 	return err;
+ }
+ 
++static void cmd_status_rsp(struct pending_cmd *cmd, void *data)
++{
++	u8 *status = data;
++
++	cmd_status(cmd->sk, cmd->index, cmd->opcode, *status);
++	mgmt_pending_remove(cmd);
++}
++
+ int mgmt_index_added(u16 index)
+ {
+ 	BT_DBG("%d", index);
+@@ -2407,7 +2499,12 @@
+ 
+ int mgmt_index_removed(u16 index)
+ {
++	u8 status = ENODEV;
++
+ 	BT_DBG("%d", index);
++
++	mgmt_pending_foreach(0, index, cmd_status_rsp, &status);
++
+ 	return mgmt_event(MGMT_EV_INDEX_REMOVED, index, NULL, 0, NULL);
+ }
+ 
+@@ -2446,6 +2543,11 @@
+ 
+ 	mgmt_pending_foreach(MGMT_OP_SET_POWERED, index, mode_rsp, &match);
+ 
++	if (!powered) {
++		u8 status = ENETDOWN;
++		mgmt_pending_foreach(0, index, cmd_status_rsp, &status);
++	}
++
+ 	ev.val = powered;
+ 
+ 	ret = mgmt_event(MGMT_EV_POWERED, index, &ev, sizeof(ev), match.sk);
+@@ -2676,8 +2778,11 @@
+ 	if ((conn->auth_type & HCI_AT_DEDICATED_BONDING) &&
+ 			conn->auth_initiator && rem_cap == 0x03)
+ 		ev.auto_confirm = 1;
+-	else if (loc_cap == 0x01 && (rem_cap == 0x00 || rem_cap == 0x03))
++	else if (loc_cap == 0x01 && (rem_cap == 0x00 || rem_cap == 0x03)) {
++		if (!loc_mitm && !rem_mitm)
++			value = 0;
+ 		goto no_auto_confirm;
++	}
+ 
+ 
+ 	if ((!loc_mitm || rem_cap == 0x03) && (!rem_mitm || loc_cap == 0x03))
+@@ -2818,6 +2923,57 @@
+ 	return err;
+ }
+ 
++void mgmt_read_rssi_complete(u16 index, s8 rssi, bdaddr_t *bdaddr,
++		u16 handle, u8 status)
++{
++	struct mgmt_ev_rssi_update ev;
++	struct hci_conn *conn;
++	struct hci_dev *hdev;
++
++	if (status)
++		return;
++
++	hdev = hci_dev_get(index);
++	conn = hci_conn_hash_lookup_handle(hdev, handle);
++
++	if (!conn)
++		return;
++
++	BT_DBG("rssi_update_thresh_exceed : %d ",
++		   conn->rssi_update_thresh_exceed);
++	BT_DBG("RSSI Threshold : %d , recvd RSSI : %d ",
++			conn->rssi_threshold, rssi);
++
++	if (conn->rssi_update_thresh_exceed == 1) {
++		BT_DBG("rssi_update_thresh_exceed == 1");
++		if (rssi > conn->rssi_threshold) {
++			memset(&ev, 0, sizeof(ev));
++			bacpy(&ev.bdaddr, bdaddr);
++			ev.rssi = rssi;
++			mgmt_event(MGMT_EV_RSSI_UPDATE, index, &ev,
++				sizeof(ev), NULL);
++		} else {
++			hci_conn_set_rssi_reporter(conn, conn->rssi_threshold,
++				conn->rssi_update_interval,
++				conn->rssi_update_thresh_exceed);
++		}
++	} else {
++		BT_DBG("rssi_update_thresh_exceed == 0");
++		if (rssi < conn->rssi_threshold) {
++			memset(&ev, 0, sizeof(ev));
++			bacpy(&ev.bdaddr, bdaddr);
++			ev.rssi = rssi;
++			mgmt_event(MGMT_EV_RSSI_UPDATE, index, &ev,
++				sizeof(ev), NULL);
++		} else {
++			hci_conn_set_rssi_reporter(conn, conn->rssi_threshold,
++				conn->rssi_update_interval,
++				conn->rssi_update_thresh_exceed);
++		}
++	}
++}
++
++
+ int mgmt_device_found(u16 index, bdaddr_t *bdaddr, u8 type, u8 le,
+ 			u8 *dev_class, s8 rssi, u8 eir_len, u8 *eir)
+ {
+@@ -2945,4 +3101,4 @@
+ 
+ 	return mgmt_event(MGMT_EV_REMOTE_FEATURES, index, &ev, sizeof(ev),
+ 									NULL);
+-}
+\ No newline at end of file
++}
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/rfcomm/core.c android_kernel_htc_primoc.new/net/bluetooth/rfcomm/core.c
+--- android_kernel_htc_primoc/net/bluetooth/rfcomm/core.c	2012-10-30 01:04:39.344141338 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/rfcomm/core.c	2012-10-30 01:04:10.590128219 +0100
+@@ -39,6 +39,7 @@
+ #include <linux/mutex.h>
+ #include <linux/kthread.h>
+ #include <linux/slab.h>
++#include <linux/interrupt.h>
+ 
+ #include <net/sock.h>
+ #include <linux/uaccess.h>
+@@ -50,9 +51,12 @@
+ #include <net/bluetooth/rfcomm.h>
+ 
+ #define VERSION "1.11"
++/* 1 Byte DLCI, 1 Byte Control filed, 2 Bytes Length, 1 Byte for Credits,
++ * 1 Byte FCS */
++#define RFCOMM_HDR_SIZE 6
+ 
+-static int disable_cfc;
+-static int l2cap_ertm;
++static bool disable_cfc;
++static bool l2cap_ertm;
+ static int channel_mtu = -1;
+ static unsigned int l2cap_mtu = RFCOMM_MAX_L2CAP_MTU;
+ 
+@@ -82,7 +86,9 @@
+ static struct rfcomm_session *rfcomm_session_create(bdaddr_t *src,
+ 							bdaddr_t *dst,
+ 							u8 sec_level,
+-							int *err);
++							int *err,
++							u8 channel,
++							struct rfcomm_dlc *d);
+ static struct rfcomm_session *rfcomm_session_get(bdaddr_t *src, bdaddr_t *dst);
+ static void rfcomm_session_del(struct rfcomm_session *s);
+ 
+@@ -116,6 +122,12 @@
+ #define __get_rpn_stop_bits(line) (((line) >> 2) & 0x1)
+ #define __get_rpn_parity(line)    (((line) >> 3) & 0x7)
+ 
++struct rfcomm_sock_release_work {
++	struct work_struct work;
++	struct socket *sock;
++	int state;
++};
++
+ static inline void rfcomm_schedule(void)
+ {
+ 	if (!rfcomm_thread)
+@@ -232,8 +244,6 @@
+ static inline int rfcomm_check_security(struct rfcomm_dlc *d)
+ {
+ 	struct sock *sk = d->session->sock->sk;
+-	struct l2cap_conn *conn = l2cap_pi(sk)->chan->conn;
+-
+ 	__u8 auth_type;
+ 
+ 	switch (d->sec_level) {
+@@ -248,7 +258,8 @@
+ 		break;
+ 	}
+ 
+-	return hci_conn_security(conn->hcon, d->sec_level, auth_type);
++	return hci_conn_security(l2cap_pi(sk)->conn->hcon, d->sec_level,
++								auth_type);
+ }
+ 
+ static void rfcomm_session_timeout(unsigned long arg)
+@@ -406,31 +417,31 @@
+ 
+ 	s = rfcomm_session_get(src, dst);
+ 	if (!s) {
+-		s = rfcomm_session_create(src, dst, d->sec_level, &err);
++		s = rfcomm_session_create(src, dst,
++						d->sec_level, &err, channel, d);
+ 		if (!s)
+ 			return err;
+-	}
+-
+-	dlci = __dlci(!s->initiator, channel);
+-
+-	/* Check if DLCI already exists */
+-	if (rfcomm_dlc_get(s, dlci))
+-		return -EBUSY;
++	} else {
++		dlci = __dlci(!s->initiator, channel);
+ 
+-	rfcomm_dlc_clear_state(d);
++		/* Check if DLCI already exists */
++		if (rfcomm_dlc_get(s, dlci))
++			return -EBUSY;
+ 
+-	d->dlci     = dlci;
+-	d->addr     = __addr(s->initiator, dlci);
+-	d->priority = 7;
++		rfcomm_dlc_clear_state(d);
+ 
+-	d->state = BT_CONFIG;
+-	rfcomm_dlc_link(s, d);
++		d->dlci     = dlci;
++		d->addr     = __addr(s->initiator, dlci);
++		d->priority = 7;
+ 
+-	d->out = 1;
++		d->state = BT_CONFIG;
++		rfcomm_dlc_link(s, d);
+ 
+-	d->mtu = s->mtu;
+-	d->cfc = (s->cfc == RFCOMM_CFC_UNKNOWN) ? 0 : s->cfc;
++		d->out = 1;
+ 
++		d->mtu = s->mtu;
++		d->cfc = (s->cfc == RFCOMM_CFC_UNKNOWN) ? 0 : s->cfc;
++	}
+ 	if (s->state == BT_CONNECTED) {
+ 		if (rfcomm_check_security(d))
+ 			rfcomm_send_pn(s, 1, d);
+@@ -466,7 +477,6 @@
+ 
+ 	switch (d->state) {
+ 	case BT_CONNECT:
+-	case BT_CONFIG:
+ 		if (test_and_clear_bit(RFCOMM_DEFER_SETUP, &d->flags)) {
+ 			set_bit(RFCOMM_AUTH_REJECT, &d->flags);
+ 			rfcomm_schedule();
+@@ -627,9 +637,25 @@
+ 	return s;
+ }
+ 
++static void rfcomm_sock_release_worker(struct work_struct *work)
++{
++	struct rfcomm_sock_release_work *release_work =
++		container_of(work, struct rfcomm_sock_release_work, work);
++
++	BT_DBG("sock %p", release_work->sock);
++
++	sock_release(release_work->sock);
++	if (release_work->state != BT_LISTEN)
++		module_put(THIS_MODULE);
++
++	kfree(release_work);
++}
++
+ static void rfcomm_session_del(struct rfcomm_session *s)
+ {
+ 	int state = s->state;
++	struct socket *sock = s->sock;
++	struct rfcomm_sock_release_work *release_work;
+ 
+ 	BT_DBG("session %p state %ld", s, s->state);
+ 
+@@ -639,11 +665,19 @@
+ 		rfcomm_send_disc(s, 0);
+ 
+ 	rfcomm_session_clear_timer(s);
+-	sock_release(s->sock);
++
+ 	kfree(s);
+ 
+-	if (state != BT_LISTEN)
+-		module_put(THIS_MODULE);
++	release_work = kzalloc(sizeof(*release_work), GFP_ATOMIC);
++	if (release_work) {
++		INIT_WORK(&release_work->work, rfcomm_sock_release_worker);
++		release_work->sock = sock;
++		release_work->state = state;
++
++		if (!schedule_work(&release_work->work))
++			kfree(release_work);
++	}
++
+ }
+ 
+ static struct rfcomm_session *rfcomm_session_get(bdaddr_t *src, bdaddr_t *dst)
+@@ -687,12 +721,15 @@
+ static struct rfcomm_session *rfcomm_session_create(bdaddr_t *src,
+ 							bdaddr_t *dst,
+ 							u8 sec_level,
+-							int *err)
++							int *err,
++							u8 channel,
++							struct rfcomm_dlc *d)
+ {
+ 	struct rfcomm_session *s = NULL;
+ 	struct sockaddr_l2 addr;
+ 	struct socket *sock;
+ 	struct sock *sk;
++	u8 dlci;
+ 
+ 	BT_DBG("%s %s", batostr(src), batostr(dst));
+ 
+@@ -711,10 +748,10 @@
+ 	/* Set L2CAP options */
+ 	sk = sock->sk;
+ 	lock_sock(sk);
+-	l2cap_pi(sk)->chan->imtu = l2cap_mtu;
+-	l2cap_pi(sk)->chan->sec_level = sec_level;
++	l2cap_pi(sk)->imtu = l2cap_mtu;
++	l2cap_pi(sk)->sec_level = sec_level;
+ 	if (l2cap_ertm)
+-		l2cap_pi(sk)->chan->mode = L2CAP_MODE_ERTM;
++		l2cap_pi(sk)->mode = L2CAP_MODE_ERTM;
+ 	release_sock(sk);
+ 
+ 	s = rfcomm_session_add(sock, BT_BOUND);
+@@ -729,11 +766,30 @@
+ 	addr.l2_family = AF_BLUETOOTH;
+ 	addr.l2_psm    = cpu_to_le16(RFCOMM_PSM);
+ 	addr.l2_cid    = 0;
++	dlci = __dlci(!s->initiator, channel);
++
++	/* Check if DLCI already exists */
++	if (rfcomm_dlc_get(s, dlci))
++		return NULL;
++
++	rfcomm_dlc_clear_state(d);
++
++	d->dlci     = dlci;
++	d->addr     = __addr(s->initiator, dlci);
++	d->priority = 7;
++
++	d->state = BT_CONFIG;
++	rfcomm_dlc_link(s, d);
++
++	d->out = 1;
++
++	d->mtu = s->mtu;
++	d->cfc = (s->cfc == RFCOMM_CFC_UNKNOWN) ? 0 : s->cfc;
+ 	*err = kernel_connect(sock, (struct sockaddr *) &addr, sizeof(addr), O_NONBLOCK);
+ 	if (*err == 0 || *err == -EINPROGRESS)
+ 		return s;
+-
+-	rfcomm_session_del(s);
++	BT_ERR("error ret is %d, going to delete session", *err);
++	rfcomm_dlc_unlink(d);
+ 	return NULL;
+ 
+ failed:
+@@ -1148,6 +1204,7 @@
+ 			if (list_empty(&s->dlcs)) {
+ 				s->state = BT_DISCONN;
+ 				rfcomm_send_disc(s, 0);
++				rfcomm_session_clear_timer(s);
+ 			}
+ 
+ 			break;
+@@ -1242,7 +1299,6 @@
+ void rfcomm_dlc_accept(struct rfcomm_dlc *d)
+ {
+ 	struct sock *sk = d->session->sock->sk;
+-	struct l2cap_conn *conn = l2cap_pi(sk)->chan->conn;
+ 
+ 	BT_DBG("dlc %p", d);
+ 
+@@ -1256,7 +1312,7 @@
+ 	rfcomm_dlc_unlock(d);
+ 
+ 	if (d->role_switch)
+-		hci_conn_switch_role(conn->hcon, 0x00);
++		hci_conn_switch_role(l2cap_pi(sk)->conn->hcon, 0x00);
+ 
+ 	rfcomm_send_msc(d->session, 1, d->dlci, d->v24_sig);
+ }
+@@ -1855,7 +1911,10 @@
+ 	/* Get data directly from socket receive queue without copying it. */
+ 	while ((skb = skb_dequeue(&sk->sk_receive_queue))) {
+ 		skb_orphan(skb);
+-		rfcomm_recv_frame(s, skb);
++		if (!skb_linearize(skb))
++			rfcomm_recv_frame(s, skb);
++		else
++			kfree_skb(skb);
+ 	}
+ 
+ 	if (sk->sk_state == BT_CLOSED) {
+@@ -1891,9 +1950,10 @@
+ 		rfcomm_session_hold(s);
+ 
+ 		/* We should adjust MTU on incoming sessions.
+-		 * L2CAP MTU minus UIH header and FCS. */
+-		s->mtu = min(l2cap_pi(nsock->sk)->chan->omtu,
+-				l2cap_pi(nsock->sk)->chan->imtu) - 5;
++		 * L2CAP MTU minus UIH header and FCS.
++		 * Need to accomodate 1 Byte credits information */
++		s->mtu = min(l2cap_pi(nsock->sk)->omtu,
++				l2cap_pi(nsock->sk)->imtu) - RFCOMM_HDR_SIZE;
+ 
+ 		rfcomm_schedule();
+ 	} else
+@@ -1911,8 +1971,9 @@
+ 		s->state = BT_CONNECT;
+ 
+ 		/* We can adjust MTU on outgoing sessions.
+-		 * L2CAP MTU minus UIH header and FCS. */
+-		s->mtu = min(l2cap_pi(sk)->chan->omtu, l2cap_pi(sk)->chan->imtu) - 5;
++		 * L2CAP MTU minus UIH header, Credits and FCS. */
++		s->mtu = min(l2cap_pi(sk)->omtu, l2cap_pi(sk)->imtu) -
++						RFCOMM_HDR_SIZE;
+ 
+ 		rfcomm_send_sabm(s, 0);
+ 		break;
+@@ -1995,7 +2056,7 @@
+ 	/* Set L2CAP options */
+ 	sk = sock->sk;
+ 	lock_sock(sk);
+-	l2cap_pi(sk)->chan->imtu = l2cap_mtu;
++	l2cap_pi(sk)->imtu = l2cap_mtu;
+ 	release_sock(sk);
+ 
+ 	/* Start listening on the socket */
+@@ -2096,7 +2157,7 @@
+ 		if (!test_and_clear_bit(RFCOMM_AUTH_PENDING, &d->flags))
+ 			continue;
+ 
+-		if (!status && hci_conn_check_secure(conn, d->sec_level))
++		if (!status)
+ 			set_bit(RFCOMM_AUTH_ACCEPT, &d->flags);
+ 		else
+ 			set_bit(RFCOMM_AUTH_REJECT, &d->flags);
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/rfcomm/Kconfig android_kernel_htc_primoc.new/net/bluetooth/rfcomm/Kconfig
+--- android_kernel_htc_primoc/net/bluetooth/rfcomm/Kconfig	2012-10-30 01:04:39.343141337 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/rfcomm/Kconfig	2012-10-30 01:04:10.592128222 +0100
+@@ -1,6 +1,6 @@
+ config BT_RFCOMM
+ 	tristate "RFCOMM protocol support"
+-	depends on BT && BT_L2CAP
++	depends on BT
+ 	help
+ 	  RFCOMM provides connection oriented stream transport.  RFCOMM
+ 	  support is required for Dialup Networking, OBEX and other Bluetooth
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/rfcomm/sock.c android_kernel_htc_primoc.new/net/bluetooth/rfcomm/sock.c
+--- android_kernel_htc_primoc/net/bluetooth/rfcomm/sock.c	2012-10-30 01:04:39.344141338 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/rfcomm/sock.c	2012-10-30 01:04:10.591128221 +0100
+@@ -743,7 +743,6 @@
+ 	struct sock *sk = sock->sk;
+ 	struct sock *l2cap_sk;
+ 	struct rfcomm_conninfo cinfo;
+-	struct l2cap_conn *conn = l2cap_pi(sk)->chan->conn;
+ 	int len, err = 0;
+ 	u32 opt;
+ 
+@@ -788,9 +787,8 @@
+ 
+ 		l2cap_sk = rfcomm_pi(sk)->dlc->session->sock->sk;
+ 
+-		memset(&cinfo, 0, sizeof(cinfo));
+-		cinfo.hci_handle = conn->hcon->handle;
+-		memcpy(cinfo.dev_class, conn->hcon->dev_class, 3);
++		cinfo.hci_handle = l2cap_pi(l2cap_sk)->conn->hcon->handle;
++		memcpy(cinfo.dev_class, l2cap_pi(l2cap_sk)->conn->hcon->dev_class, 3);
+ 
+ 		len = min_t(unsigned int, len, sizeof(cinfo));
+ 		if (copy_to_user(optval, (char *) &cinfo, len))
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/rfcomm/tty.c android_kernel_htc_primoc.new/net/bluetooth/rfcomm/tty.c
+--- android_kernel_htc_primoc/net/bluetooth/rfcomm/tty.c	2012-10-30 01:04:39.344141338 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/rfcomm/tty.c	2012-10-30 01:04:10.576128213 +0100
+@@ -26,6 +26,7 @@
+  */
+ 
+ #include <linux/module.h>
++#include <linux/interrupt.h>
+ 
+ #include <linux/tty.h>
+ #include <linux/tty_driver.h>
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/sco.c android_kernel_htc_primoc.new/net/bluetooth/sco.c
+--- android_kernel_htc_primoc/net/bluetooth/sco.c	2012-10-30 01:04:39.344141338 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/sco.c	2012-10-30 01:04:10.631128239 +0100
+@@ -1,6 +1,7 @@
+ /*
+    BlueZ - Bluetooth protocol stack for Linux
+    Copyright (C) 2000-2001 Qualcomm Incorporated
++   Copyright (c) 2011, Code Aurora Forum. All rights reserved.
+ 
+    Written 2000,2001 by Maxim Krasnyansky <maxk@qualcomm.com>
+ 
+@@ -24,6 +25,7 @@
+ 
+ /* Bluetooth SCO sockets. */
+ 
++#include <linux/interrupt.h>
+ #include <linux/module.h>
+ 
+ #include <linux/types.h>
+@@ -50,7 +52,7 @@
+ #include <net/bluetooth/hci_core.h>
+ #include <net/bluetooth/sco.h>
+ 
+-static int disable_esco;
++static bool disable_esco;
+ 
+ static const struct proto_ops sco_sock_ops;
+ 
+@@ -61,7 +63,7 @@
+ static void __sco_chan_add(struct sco_conn *conn, struct sock *sk, struct sock *parent);
+ static void sco_chan_del(struct sock *sk, int err);
+ 
+-static int  sco_conn_del(struct hci_conn *conn, int err);
++static int  sco_conn_del(struct hci_conn *conn, int err, u8 is_process);
+ 
+ static void sco_sock_close(struct sock *sk);
+ static void sco_sock_kill(struct sock *sk);
+@@ -134,7 +136,7 @@
+ 	return sk;
+ }
+ 
+-static int sco_conn_del(struct hci_conn *hcon, int err)
++static int sco_conn_del(struct hci_conn *hcon, int err, u8 is_process)
+ {
+ 	struct sco_conn *conn = hcon->sco_data;
+ 	struct sock *sk;
+@@ -147,10 +149,16 @@
+ 	/* Kill socket */
+ 	sk = sco_chan_get(conn);
+ 	if (sk) {
+-		bh_lock_sock(sk);
++		if (is_process)
++			lock_sock(sk);
++		else
++			bh_lock_sock(sk);
+ 		sco_sock_clear_timer(sk);
+ 		sco_chan_del(sk, err);
+-		bh_unlock_sock(sk);
++		if (is_process)
++			release_sock(sk);
++		else
++			bh_unlock_sock(sk);
+ 		sco_sock_kill(sk);
+ 	}
+ 
+@@ -173,10 +181,11 @@
+ 	return err;
+ }
+ 
+-static int sco_connect(struct sock *sk)
++static int sco_connect(struct sock *sk, __s8 is_wbs)
+ {
+ 	bdaddr_t *src = &bt_sk(sk)->src;
+ 	bdaddr_t *dst = &bt_sk(sk)->dst;
++	__u16 pkt_type = sco_pi(sk)->pkt_type;
+ 	struct sco_conn *conn;
+ 	struct hci_conn *hcon;
+ 	struct hci_dev  *hdev;
+@@ -190,17 +199,33 @@
+ 
+ 	hci_dev_lock_bh(hdev);
+ 
+-	if (lmp_esco_capable(hdev) && !disable_esco)
++	hdev->is_wbs = is_wbs;
++
++	if (lmp_esco_capable(hdev) && !disable_esco) {
+ 		type = ESCO_LINK;
+-	else
++	} else if (is_wbs) {
++		return -ENAVAIL;
++	} else {
+ 		type = SCO_LINK;
++		pkt_type &= SCO_ESCO_MASK;
++	}
+ 
+-	hcon = hci_connect(hdev, type, dst, BT_SECURITY_LOW, HCI_AT_NO_BONDING);
++	BT_DBG("type: %d, pkt_type: 0x%x", type, pkt_type);
++
++	hcon = hci_connect(hdev, type, pkt_type, dst,
++					BT_SECURITY_LOW, HCI_AT_NO_BONDING);
+ 	if (IS_ERR(hcon)) {
+ 		err = PTR_ERR(hcon);
+ 		goto done;
+ 	}
+ 
++	if (is_wbs && (hcon->type != ESCO_LINK)) {
++		BT_ERR("WBS [ hcon->type: 0x%x, hcon->pkt_type: 0x%x ]",
++				hcon->type, hcon->pkt_type);
++		err = -EREMOTEIO;
++		goto done;
++	}
++
+ 	conn = sco_conn_add(hcon, 0);
+ 	if (!conn) {
+ 		hci_conn_put(hcon);
+@@ -369,15 +394,6 @@
+ 
+ 	case BT_CONNECTED:
+ 	case BT_CONFIG:
+-		if (sco_pi(sk)->conn) {
+-			sk->sk_state = BT_DISCONN;
+-			sco_sock_set_timer(sk, SCO_DISCONN_TIMEOUT);
+-			hci_conn_put(sco_pi(sk)->conn->hcon);
+-			sco_pi(sk)->conn->hcon = NULL;
+-		} else
+-			sco_chan_del(sk, ECONNRESET);
+-		break;
+-
+ 	case BT_CONNECT:
+ 	case BT_DISCONN:
+ 		sco_chan_del(sk, ECONNRESET);
+@@ -460,18 +476,22 @@
+ 	return 0;
+ }
+ 
+-static int sco_sock_bind(struct socket *sock, struct sockaddr *addr, int addr_len)
++static int sco_sock_bind(struct socket *sock, struct sockaddr *addr, int alen)
+ {
+-	struct sockaddr_sco *sa = (struct sockaddr_sco *) addr;
++	struct sockaddr_sco sa;
+ 	struct sock *sk = sock->sk;
+-	bdaddr_t *src = &sa->sco_bdaddr;
+-	int err = 0;
++	bdaddr_t *src = &sa.sco_bdaddr;
++	int len, err = 0;
+ 
+-	BT_DBG("sk %p %s", sk, batostr(&sa->sco_bdaddr));
++	BT_DBG("sk %p %s", sk, batostr(&sa.sco_bdaddr));
+ 
+ 	if (!addr || addr->sa_family != AF_BLUETOOTH)
+ 		return -EINVAL;
+ 
++	memset(&sa, 0, sizeof(sa));
++	len = min_t(unsigned int, sizeof(sa), alen);
++	memcpy(&sa, addr, len);
++
+ 	lock_sock(sk);
+ 
+ 	if (sk->sk_state != BT_OPEN) {
+@@ -485,7 +505,8 @@
+ 		err = -EADDRINUSE;
+ 	} else {
+ 		/* Save source address */
+-		bacpy(&bt_sk(sk)->src, &sa->sco_bdaddr);
++		bacpy(&bt_sk(sk)->src, &sa.sco_bdaddr);
++		sco_pi(sk)->pkt_type = sa.sco_pkt_type;
+ 		sk->sk_state = BT_BOUND;
+ 	}
+ 
+@@ -498,29 +519,36 @@
+ 
+ static int sco_sock_connect(struct socket *sock, struct sockaddr *addr, int alen, int flags)
+ {
+-	struct sockaddr_sco *sa = (struct sockaddr_sco *) addr;
+ 	struct sock *sk = sock->sk;
+-	int err = 0;
+-
++	struct sockaddr_sco sa;
++	int len, err = 0;
+ 
+ 	BT_DBG("sk %p", sk);
+ 
+-	if (alen < sizeof(struct sockaddr_sco) ||
+-	    addr->sa_family != AF_BLUETOOTH)
++	if (!addr || addr->sa_family != AF_BLUETOOTH)
+ 		return -EINVAL;
+ 
+-	if (sk->sk_state != BT_OPEN && sk->sk_state != BT_BOUND)
+-		return -EBADFD;
+-
+-	if (sk->sk_type != SOCK_SEQPACKET)
+-		return -EINVAL;
++	memset(&sa, 0, sizeof(sa));
++	len = min_t(unsigned int, sizeof(sa), alen);
++	memcpy(&sa, addr, len);
+ 
+ 	lock_sock(sk);
+ 
++	if (sk->sk_type != SOCK_SEQPACKET) {
++		err = -EINVAL;
++		goto done;
++	}
++
++	if (sk->sk_state != BT_OPEN && sk->sk_state != BT_BOUND) {
++		err = -EBADFD;
++		goto done;
++	}
++
+ 	/* Set destination address and psm */
+-	bacpy(&bt_sk(sk)->dst, &sa->sco_bdaddr);
++	bacpy(&bt_sk(sk)->dst, &sa.sco_bdaddr);
++	sco_pi(sk)->pkt_type = sa.sco_pkt_type;
+ 
+-	err = sco_connect(sk);
++	err = sco_connect(sk, sa.is_wbs);
+ 	if (err)
+ 		goto done;
+ 
+@@ -625,6 +653,7 @@
+ 		bacpy(&sa->sco_bdaddr, &bt_sk(sk)->dst);
+ 	else
+ 		bacpy(&sa->sco_bdaddr, &bt_sk(sk)->src);
++	sa->sco_pkt_type = sco_pi(sk)->pkt_type;
+ 
+ 	return 0;
+ }
+@@ -828,9 +857,7 @@
+ 		conn->sk = NULL;
+ 		sco_pi(sk)->conn = NULL;
+ 		sco_conn_unlock(conn);
+-
+-		if (conn->hcon)
+-			hci_conn_put(conn->hcon);
++		hci_conn_put(conn->hcon);
+ 	}
+ 
+ 	sk->sk_state = BT_CLOSED;
+@@ -897,7 +924,7 @@
+ 	int lm = 0;
+ 
+ 	if (type != SCO_LINK && type != ESCO_LINK)
+-		return -EINVAL;
++		return 0;
+ 
+ 	BT_DBG("hdev %s, bdaddr %s", hdev->name, batostr(bdaddr));
+ 
+@@ -932,19 +959,19 @@
+ 		if (conn)
+ 			sco_conn_ready(conn);
+ 	} else
+-		sco_conn_del(hcon, bt_err(status));
++		sco_conn_del(hcon, bt_err(status), 0);
+ 
+ 	return 0;
+ }
+ 
+-static int sco_disconn_cfm(struct hci_conn *hcon, __u8 reason)
++static int sco_disconn_cfm(struct hci_conn *hcon, __u8 reason, __u8 is_process)
+ {
+ 	BT_DBG("hcon %p reason %d", hcon, reason);
+ 
+ 	if (hcon->type != SCO_LINK && hcon->type != ESCO_LINK)
+ 		return -EINVAL;
+ 
+-	sco_conn_del(hcon, bt_err(reason));
++	sco_conn_del(hcon, bt_err(reason), is_process);
+ 
+ 	return 0;
+ }
+diff -u -r -N android_kernel_htc_primoc/net/bluetooth/smp.c android_kernel_htc_primoc.new/net/bluetooth/smp.c
+--- android_kernel_htc_primoc/net/bluetooth/smp.c	2012-10-30 01:04:39.344141338 +0100
++++ android_kernel_htc_primoc.new/net/bluetooth/smp.c	2012-10-30 01:04:10.631128239 +0100
+@@ -20,6 +20,9 @@
+    SOFTWARE IS DISCLAIMED.
+ */
+ 
++#include <linux/interrupt.h>
++#include <linux/module.h>
++
+ #include <net/bluetooth/bluetooth.h>
+ #include <net/bluetooth/hci_core.h>
+ #include <net/bluetooth/l2cap.h>
+@@ -717,6 +720,7 @@
+ 	memset(&cp, 0, sizeof(cp));
+ 	build_pairing_cmd(conn, &cp, NULL, rp->auth_req);
+ 
++	hcon->pending_sec_level = authreq_to_seclevel(rp->auth_req);
+ 	hcon->preq[0] = SMP_CMD_PAIRING_REQ;
+ 	memcpy(&hcon->preq[1], &cp, sizeof(cp));
+ 
