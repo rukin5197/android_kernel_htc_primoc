@@ -114,6 +114,10 @@
 #include <mach/htc_bdaddress.h>
 #endif
 
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+#include <mach/bcm_bt_lpm.h>
+#endif
+
 #ifdef CONFIG_MFD_MAX8957
 #include <linux/mfd/pmicmax8957.h>
 #include <linux/max8957_gpio.h>
@@ -3423,16 +3427,38 @@ static struct platform_device msm_adc_device = {
 };
 #endif
 
-#ifdef CONFIG_SERIAL_MSM_HS
+#if defined(CONFIG_SERIAL_MSM_HS) || defined(CONFIG_SERIAL_MSM_HS_LPM)
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
+        .rx_wakeup_irq = -1,
 	.inject_rx_on_wakeup = 0,
-	.cpu_lock_supported = 1,
 
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+	.exit_lpm_cb = bcm_bt_lpm_exit_lpm_locked,
+#else
 	/* for bcm BT */
 	.bt_wakeup_pin_supported = 1,
 	.bt_wakeup_pin = PRIMOC_GPIO_BT_WAKE,
 	.host_wakeup_pin = PRIMOC_GPIO_BT_HOST_WAKE,
+#endif
 };
+
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+static struct bcm_bt_lpm_platform_data bcm_bt_lpm_pdata = {
+	.gpio_wake = PRIMOC_GPIO_BT_WAKE,
+	.gpio_host_wake = PRIMOC_GPIO_BT_HOST_WAKE,
+	.request_clock_off_locked = msm_hs_request_clock_off_locked,
+	.request_clock_on_locked = msm_hs_request_clock_on_locked,
+};
+
+struct platform_device bcm_bt_lpm_device = {
+	.name = "bcm_bt_lpm",
+	.id = 0,
+	.dev = {
+		.platform_data = &bcm_bt_lpm_pdata,
+	},
+};
+#endif
+
 #endif
 
 #ifdef CONFIG_BT
@@ -3835,8 +3861,11 @@ static struct platform_device *devices[] __initdata = {
 #endif
 	&msm_ebi0_thermal,
 	&msm_ebi1_thermal,
-#ifdef CONFIG_SERIAL_MSM_HS
-	&msm_device_uart_dm1,
+#ifdef CONFIG_SERIAL_BCM_BT_LPM
+       &bcm_bt_lpm_device,
+#endif
+#if defined(CONFIG_SERIAL_MSM_HS) || defined(CONFIG_SERIAL_MSM_HS_LPM)
+       &msm_device_uart_dm1,
 #endif
 #ifdef CONFIG_BT
 	&primoc_rfkill,
@@ -5210,9 +5239,16 @@ static void __init primoc_init(void)
 	bt_export_bd_address();
 #endif
 
-#ifdef CONFIG_SERIAL_MSM_HS
+#if defined(CONFIG_SERIAL_MSM_HS) || defined(CONFIG_SERIAL_MSM_HS_LPM)
+#ifndef CONFIG_SERIAL_BCM_BT_LPM
 	msm_uart_dm1_pdata.rx_wakeup_irq = gpio_to_irq(PRIMOC_GPIO_BT_HOST_WAKE);
+#endif
+#ifdef CONFIG_SERIAL_MSM_HS
 	msm_device_uart_dm1.name = "msm_serial_hs_brcm";
+#endif
+#ifdef CONFIG_SERIAL_MSM_HS_LPM
+	msm_device_uart_dm1.name = "msm_serial_hs_brcm_lpm";
+#endif
 	msm_device_uart_dm1.dev.platform_data = &msm_uart_dm1_pdata;
 #endif
 
