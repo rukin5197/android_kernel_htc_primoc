@@ -1638,6 +1638,7 @@ CONFIG_HID=y
 CONFIG_BT_TIHIDP=y
 # CONFIG_HIDRAW is not set
 # CONFIG_HID_PID is not set
+CONFIG_UHID=y
 
 #
 # Special HID drivers
