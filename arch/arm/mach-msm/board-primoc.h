@@ -47,7 +47,7 @@
 
 #define MSM_PMEM_SF_SIZE	0x01750000
 
-#define MSM_FB_SIZE		0x00500000
+#define MSM_FB_SIZE		0x00800000
 
 
 #define PRIMOC_GPIO_WIFI_IRQ             147
